@@ -24,10 +24,12 @@ Cần Prometheus đang chạy:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import pathlib
 import sys
 import time
+from datetime import UTC, datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -37,6 +39,15 @@ from src.agents.war_room_registry import WarRoomRegistry  # noqa: E402
 from src.config import configure_logging, force_utf8_console, get_settings  # noqa: E402
 from src.models.incident import IncidentState  # noqa: E402
 from src.services import executors  # noqa: E402
+from src.services.auto_remediation import (  # noqa: E402
+    NGUONG_CHO_DO_LAI_PHUT,
+    AutoFixRecord,
+    execute_auto_remediation,
+    execute_fallback_rollback,
+    ready_to_remeasure,
+    should_auto_remediate,
+    should_fallback_rollback,
+)
 from src.services.email_client import Attachment, GmailClient  # noqa: E402
 from src.services.hitl import ApprovalError, assert_human_approved  # noqa: E402
 from src.services.incident_alert import IncidentAlerter, build_alerter  # noqa: E402
@@ -45,7 +56,6 @@ from src.services.meeting_room import DailyRoomClient, build_room_client  # noqa
 from src.services.postmortem_generator import generate_postmortem  # noqa: E402
 from src.services.postmortem_report import build_detailed_report, build_email_body  # noqa: E402
 from src.services.prometheus import PrometheusClient  # noqa: E402
-from src.services.auto_remediation import execute_auto_remediation, should_auto_remediate  # noqa: E402
 from src.services.remediation import UnsupportedActionError, execute, is_already_remediated  # noqa: E402
 from src.services.status_updater import status_approved  # noqa: E402
 
@@ -129,6 +139,8 @@ def _verify_da_thi_hanh(
     jira: JiraClient,
     da_thi_hanh: set[str],
     da_verify: set[str],
+    auto_da_thi_hanh: dict[str, AutoFixRecord] | None = None,
+    da_rollback_du_phong: set[str] | None = None,
 ) -> None:
     """Đo lại các war room đã thi hành khắc phục, post kết luận lên Jira.
 
@@ -138,6 +150,17 @@ def _verify_da_thi_hanh(
     Nuốt lỗi từng issue, cùng lý do như `_xet_nang_muc()`: một lần Jira đáp 429
     không được giết cả tiến trình Agent, kể cả khi những issue khác vẫn xử lý
     bình thường được.
+
+    Args:
+        auto_da_thi_hanh: các issue **Agent tự thi hành** (auto-fix), key → dấu
+            vết lần thi hành đó. Chỉ những issue nằm trong đây mới được xét
+            rollback dự phòng, và cũng chỉ chúng mới phải chờ
+            `NGUONG_CHO_DO_LAI_PHUT` trước khi đo. `None` (mặc định) nghĩa là
+            không có auto-fix nào — luồng chạy y hệt trước 18/08, tức khi
+            `AUTO_REMEDIATION_ENABLED` chưa bật thì hành vi không đổi.
+        da_rollback_du_phong: các issue đã qua bước rollback dự phòng — đã
+            rollback, hoặc đã kết luận là không rollback được và nói ra rồi. Cả
+            hai đều không lặp lại.
     """
     for jira_key in sorted(da_thi_hanh - da_verify):
         try:
@@ -147,6 +170,22 @@ def _verify_da_thi_hanh(
             continue
         if incident is None or not incident.affected_services:
             da_verify.add(jira_key)  # không có service để đo, đừng thử lại mãi
+            continue
+
+        auto_fix = (auto_da_thi_hanh or {}).get(jira_key)
+        if auto_fix is not None and not ready_to_remeasure(auto_fix):
+            # Agent tự thi hành thì chính nó phải chờ số đo chín, vì chính nó sẽ
+            # hành động tiếp dựa trên số đo đó. Đo sớm là ra "chưa đỡ" gần như
+            # chắc chắn — cửa sổ PromQL `[1m]` còn nguyên phần dữ liệu lúc đang
+            # hỏng — rồi Agent rollback đúng một hành động đang có tác dụng.
+            #
+            # Bỏ qua chứ KHÔNG kết luận: không thêm vào `da_verify` nên vòng sau
+            # xét lại, giống hệt cách xử lý khi Prometheus chưa đo được.
+            logger.debug(
+                "%s: mới auto-fix, chờ đủ %d phút rồi mới đo lại",
+                jira_key,
+                NGUONG_CHO_DO_LAI_PHUT,
+            )
             continue
 
         service = incident.affected_services[0]
@@ -166,6 +205,16 @@ def _verify_da_thi_hanh(
         except Exception as loi:
             logger.warning("%s: không post được kết luận verify (%s)", jira_key, loi)
 
+        # Vế 3: Agent tự thi hành mà đo lại vẫn chưa đỡ → tự lùi lại phần nó vừa
+        # làm. Chỉ chạm vào những issue chính Agent quyết định, và chỉ một lần.
+        if auto_fix is not None and _rollback_du_phong(
+            jira, auto_fix, ket_qua, auto_da_thi_hanh, da_rollback_du_phong
+        ):
+            # Đã rollback thật → cho `verify()` chạy lại ĐÚNG một lần nữa, nên
+            # không đánh dấu đã kết luận. Vòng sau `should_fallback_rollback()`
+            # tự từ chối rollback lần hai, nên không có vòng lặp vô hạn.
+            continue
+
         # KHÔNG tự chuyển sang Resolved dù đã hồi phục.
         #
         # Đóng issue là một quyết định của người trực: họ có thể còn muốn điều tra
@@ -175,10 +224,72 @@ def _verify_da_thi_hanh(
         da_verify.add(jira_key)
 
 
+def _rollback_du_phong(
+    jira: JiraClient,
+    auto_fix: AutoFixRecord,
+    ket_qua,  # VerifyResult
+    auto_da_thi_hanh: dict[str, AutoFixRecord] | None,
+    da_rollback_du_phong: set[str] | None,
+) -> bool:
+    """Xét và thi hành rollback dự phòng cho MỘT issue Agent đã tự thi hành.
+
+    Tách khỏi `_verify_da_thi_hanh()` để test gọi thẳng được, cùng lý do với
+    `_xet_nang_muc()` trong `incident_graph.py` — và cũng nuốt lỗi cùng lý do:
+    `main()` chỉ bắt `KeyboardInterrupt`, nên một lần Jira đáp 429 ở đây là giết
+    cả tiến trình Agent giữa lúc đang có sự cố.
+
+    Returns:
+        `True` khi **đã rollback thật** — người gọi cần cho đo lại một lần nữa.
+        `False` khi không rollback (chưa đủ điều kiện, đã rollback rồi, tệ hơn,
+        không biết lùi về đâu, hoặc có lỗi) — khi đó kết luận vừa post là kết
+        luận cuối.
+    """
+    jira_key = auto_fix.jira_key
+    try:
+        quyet_dinh = should_fallback_rollback(
+            auto_fix,
+            hoi_phuc=ket_qua.hoi_phuc,
+            te_hon=ket_qua.te_hon,
+            con_lai=ket_qua.con_lai,
+            da_rollback_du_phong=jira_key in (da_rollback_du_phong or set()),
+        )
+        if quyet_dinh is None:
+            return False
+
+        ket_qua_rollback = execute_fallback_rollback(jira, quyet_dinh)
+        # Đánh dấu kể cả khi không rollback được: comment giải thích đã post rồi,
+        # post lại mỗi vòng quét chỉ làm ngập war room.
+        if da_rollback_du_phong is not None:
+            da_rollback_du_phong.add(jira_key)
+
+        if ket_qua_rollback is None:
+            return False
+
+        logger.warning(
+            "🔁 %s: rollback dự phòng %s → %s — %s",
+            jira_key,
+            auto_fix.target,
+            quyet_dinh.to_version,
+            "thành công" if ket_qua_rollback.succeeded else "THẤT BẠI",
+        )
+        # Dời mốc đếm sang lúc rollback: lần đo tới cũng phải chờ số đo chín,
+        # đúng như lần đầu. Ghi `action="rollback"` để chính bản ghi này chặn
+        # rollback lần hai, không chỉ dựa vào một cái set.
+        if auto_da_thi_hanh is not None:
+            auto_da_thi_hanh[jira_key] = dataclasses.replace(
+                auto_fix, action="rollback", at=datetime.now(UTC)
+            )
+        return True
+    except Exception as loi:
+        logger.error("%s: lỗi khi xét rollback dự phòng (%s)", jira_key, loi)
+        return False
+
+
 def _kiem_tra_auto_remediation(
     jira: JiraClient,
     awaiting_keys: set[str],
     already_executed: set[str],
+    auto_da_thi_hanh: dict[str, AutoFixRecord] | None = None,
 ) -> None:
     """Kiểm tra timeout và tự thi hành nếu không ai phản hồi.
 
@@ -202,15 +313,24 @@ def _kiem_tra_auto_remediation(
         if incident is None or incident.proposal is None:
             continue
 
-        decision = should_auto_remediate(
-            jira,
-            jira_key,
-            severity=incident.severity,
-            proposal_action=incident.proposal.action,
-            proposal_target=incident.proposal.target,
-            proposal_params=incident.proposal.params,
-            deploy_service=incident.affected_services[0] if incident.affected_services else None,
-        )
+        # Bọc lỗi vì `should_auto_remediate()` đi hỏi Jira (changelog) và đọc
+        # `deploy_history` — hai đường ra ngoài, hai chỗ ném được. `main()` chỉ
+        # bắt `KeyboardInterrupt` nên một exception lọt tới đây là giết cả tiến
+        # trình Agent giữa lúc đang có sự cố. Cùng lập luận với `_xet_nang_muc()`
+        # trong `incident_graph.py`.
+        try:
+            decision = should_auto_remediate(
+                jira,
+                jira_key,
+                severity=incident.severity,
+                proposal_action=incident.proposal.action,
+                proposal_target=incident.proposal.target,
+                proposal_params=incident.proposal.params,
+                deploy_service=incident.affected_services[0] if incident.affected_services else None,
+            )
+        except Exception as loi:
+            logger.error("%s: lỗi khi xét auto-remediation (%s)", jira_key, loi)
+            continue
         if decision is None:
             continue
 
@@ -233,6 +353,17 @@ def _kiem_tra_auto_remediation(
         except Exception as loi:
             logger.error("%s: lỗi khi auto-remediation (%s)", jira_key, loi)
             continue
+
+        # Ghi lại HÀNH ĐỘNG ĐÃ CHẠY, không phải hành động đã đề xuất: với P1/P2
+        # hai thứ đó khác nhau, và `_rollback_du_phong()` dựa vào đây để không
+        # rollback lần hai một issue vừa rollback xong.
+        if auto_da_thi_hanh is not None:
+            auto_da_thi_hanh[jira_key] = AutoFixRecord(
+                jira_key=jira_key,
+                action=decision.action,
+                target=decision.target,
+                at=datetime.now(UTC),
+            )
 
         already_executed.add(jira_key)
         awaiting_keys.discard(jira_key)
@@ -457,6 +588,12 @@ def main() -> int:
     #: Đã đo lại và ĐÃ KẾT LUẬN — không đo nữa. Chưa đo được (Prometheus lỗi) thì
     #: không thêm vào, để vòng sau thử lại.
     da_verify: set[str] = set()
+    #: Các issue chính Agent TỰ thi hành (auto-fix), key → dấu vết lần đó. Chỉ
+    #: chúng mới được xét rollback dự phòng: hành động do người duyệt thì người
+    #: đó theo tới cùng, Agent không tự lùi thay.
+    auto_da_thi_hanh: dict[str, AutoFixRecord] = {}
+    #: Đã qua bước rollback dự phòng — mỗi issue đúng MỘT lần.
+    da_rollback_du_phong: set[str] = set()
 
     logger.info("Bắt đầu quét %s mỗi %.0fs. Ctrl+C để dừng.", args.prometheus, args.interval)
     cycles = 0
@@ -494,7 +631,9 @@ def main() -> int:
             # tự sửa. Chạy SAU poll_jira_approvals để ưu tiên human trước.
             # Feature mặc định TẮT, bật bằng AUTO_REMEDIATION_ENABLED=1.
             if awaiting_keys - already_executed:
-                _kiem_tra_auto_remediation(jira, awaiting_keys, already_executed)
+                _kiem_tra_auto_remediation(
+                    jira, awaiting_keys, already_executed, auto_da_thi_hanh
+                )
 
             # Đo lại những ticket đã thi hành khắc phục — xem có thật sự đỡ không.
             #
@@ -504,9 +643,18 @@ def main() -> int:
             #
             # Cũng vì thế không đặt trong webhook: chờ 60 giây trong đó thì webhook
             # timeout, mà Jira Automation lại bỏ cuộc trước.
+            #
+            # Issue do Agent TỰ thi hành thì đo lại còn là căn cứ để nó rollback
+            # dự phòng, nên chúng phải chờ thêm `NGUONG_CHO_DO_LAI_PHUT` — xem
+            # `_verify_da_thi_hanh()`.
             if already_executed - da_verify:
                 _verify_da_thi_hanh(
-                    prometheus_client, jira, already_executed, da_verify
+                    prometheus_client,
+                    jira,
+                    already_executed,
+                    da_verify,
+                    auto_da_thi_hanh,
+                    da_rollback_du_phong,
                 )
 
             if args.once:

@@ -5,25 +5,126 @@ Không gọi mạng, không cần key: dùng `FakeJiraClient` và monkeypatch co
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 
-from src.models.incident import IncidentState, RemediationProposal, Severity
+from src.agents.nodes.verify import VerifyResult
+from src.models.incident import (
+    DeployRecord,
+    IncidentSignal,
+    IncidentState,
+    RemediationProposal,
+    Severity,
+)
 from src.services.auto_remediation import (
     AUTO_APPROVED_BY,
     AUTO_MARKER,
+    FALLBACK_MARKER,
+    NGUONG_CHO_DO_LAI_PHUT,
+    AutoFixRecord,
     AutoRemediationPolicy,
     execute_auto_remediation,
+    execute_fallback_rollback,
     should_auto_remediate,
+    should_fallback_rollback,
 )
 from src.services.jira import FakeJiraClient
+
+
+@pytest.fixture(autouse=True)
+def khong_thi_hanh_that(monkeypatch: pytest.MonkeyPatch):
+    """Chặn mọi test trong file này chạm vào Docker thật.
+
+    `remediation.execute()` gọi `executors.thi_hanh_that()`, và cặp
+    `("rollback", "service-thanh-toan")` — đúng cặp các test rollback dưới đây
+    dùng — NẰM TRONG danh sách trắng của `executors`. Máy nào đang export
+    `REMEDIATION_REAL=1` để chạy demo UC-4 thì chạy pytest sẽ khởi động lại
+    container thật.
+
+    `conftest.py` không chặn giúp: nó chỉ xoá các biến đọc qua `Settings`, còn
+    biến này `executors` đọc thẳng từ `os.environ`.
+    """
+    monkeypatch.setenv("REMEDIATION_REAL", "")
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+#: Mốc dựng lịch sử deploy giả. Cố định (không phải `now()`) để thứ tự các bản
+#: deploy không phụ thuộc lúc chạy test.
+_LUC_DEPLOY = datetime(2026, 8, 18, 3, 0, tzinfo=UTC)
+
+
+def _lich_su(service: str = "service-thanh-toan") -> list[DeployRecord]:
+    """Lịch sử deploy **mới nhất trước**, y như `deploys.recent_deploys()` trả.
+
+    `v1.4.3` là bản đang chạy tức nghi phạm, nên đích rollback đúng là `v1.4.2`.
+    """
+    return [
+        DeployRecord(service=service, version="v1.4.3", deployed_at=_LUC_DEPLOY),
+        DeployRecord(
+            service=service, version="v1.4.2", deployed_at=_LUC_DEPLOY - timedelta(hours=1)
+        ),
+        DeployRecord(
+            service=service, version="v1.4.1", deployed_at=_LUC_DEPLOY - timedelta(hours=2)
+        ),
+    ]
+
+
+def _patch_deploys(history: list[DeployRecord]):
+    """Patch `recent_deploys()` — pytest chạy không có Postgres.
+
+    BẮT BUỘC với mọi test đi vào nhánh rollback. Không patch thì
+    `recent_deploys()` nuốt lỗi kết nối và trả `[]`, nhánh đọc lịch sử deploy
+    không bao giờ chạy, và test "tự rollback" xanh mà chẳng nghiệm thu gì —
+    đúng lỗi mà `test_tu_rollback_p1`/`p2` mắc phải cho tới 18/08.
+    """
+    return patch("src.services.deploys.recent_deploys", return_value=history)
+
+
+def _tin_hieu_con_lai(service: str = "service-thanh-toan") -> IncidentSignal:
+    """Tín hiệu `verify()` còn đo được khi sự cố chưa đỡ."""
+    return IncidentSignal(
+        metric_name="tỷ lệ request lỗi",
+        metric_value=0.97,
+        threshold=0.10,
+        affected_service=service,
+        severity=Severity.P2,
+        breached_for_seconds=300,
+        detected_at=datetime.now(UTC),
+    )
+
+
+def _ket_qua_verify(
+    *, hoi_phuc: bool = False, te_hon: bool = False, service: str = "service-thanh-toan"
+) -> VerifyResult:
+    """Dựng `VerifyResult` như node `verify` trả về."""
+    return VerifyResult(
+        hoi_phuc=hoi_phuc,
+        con_lai=None if hoi_phuc else _tin_hieu_con_lai(service),
+        te_hon=te_hon,
+        ket_luan="(kết luận verify)",
+    )
+
+
+def _auto_fix(
+    *,
+    jira_key: str = "INC-1",
+    action: str = "restart",
+    target: str = "service-thanh-toan",
+    phut_truoc: float = NGUONG_CHO_DO_LAI_PHUT + 1,
+) -> AutoFixRecord:
+    """Dấu vết một lần Agent tự thi hành, mặc định là đã đủ thời gian đo lại."""
+    return AutoFixRecord(
+        jira_key=jira_key,
+        action=action,
+        target=target,
+        at=datetime.now(UTC) - timedelta(minutes=phut_truoc),
+    )
 
 
 def _setup_incident(
@@ -160,14 +261,20 @@ class TestShouldAutoRemediate:
         assert result.forced_rollback is False
 
     def test_tu_rollback_p1(self):
-        """P1 + 40 phút → ép rollback bất kể đề xuất ban đầu."""
+        """P1 + 40 phút → ép rollback về ĐÚNG phiên bản ngay trước bản đang chạy.
+
+        Patch `recent_deploys` là phần quan trọng nhất của test này: trước 18/08
+        nó không patch, nên khi chạy pytest (không có Postgres) hàm kia trả `[]`
+        và nhánh đọc lịch sử — chỗ chứa cả hai lỗi `.get()` trên pydantic model
+        lẫn việc lấy nhầm bản mới nhất — không bao giờ được chạy.
+        """
         jira = FakeJiraClient(verbose=False)
         jira_key = _setup_incident(
             jira, severity=Severity.P1, action="scale_up",
             awaiting_minutes_ago=40,
         )
 
-        with _policy_bat():
+        with _policy_bat(), _patch_deploys(_lich_su()):
             result = should_auto_remediate(
                 jira, jira_key,
                 severity=Severity.P1,
@@ -177,16 +284,18 @@ class TestShouldAutoRemediate:
         assert result is not None
         assert result.action == "rollback"
         assert result.forced_rollback is True
+        # v1.4.3 là bản ĐANG CHẠY (nghi phạm), lùi về nó là không lùi gì cả.
+        assert result.params["to_version"] == "v1.4.2"
 
     def test_tu_rollback_p2(self):
-        """P2 + 45 phút → ép rollback."""
+        """P2 + 45 phút → ép rollback, cùng phép chọn phiên bản với P1."""
         jira = FakeJiraClient(verbose=False)
         jira_key = _setup_incident(
             jira, severity=Severity.P2, action="restart",
             awaiting_minutes_ago=45,
         )
 
-        with _policy_bat():
+        with _policy_bat(), _patch_deploys(_lich_su()):
             result = should_auto_remediate(
                 jira, jira_key,
                 severity=Severity.P2,
@@ -196,6 +305,104 @@ class TestShouldAutoRemediate:
         assert result is not None
         assert result.action == "rollback"
         assert result.forced_rollback is True
+        assert result.params["to_version"] == "v1.4.2"
+
+    def test_tu_rollback_dung_de_xuat_goc_khi_de_xuat_von_da_la_rollback(self):
+        """Đề xuất gốc đã là rollback thì tin `to_version` của nó.
+
+        `runbooks` tính giá trị đó từ **nghi phạm thật** — bản deploy trùng thời
+        gian với lúc sự cố bắt đầu — chứ không phải từ bản mới nhất. Đó là thông
+        tin nhiều hơn thứ `resolve_rollback_version()` tự suy ra được, nên khi có
+        thì dùng: ở đây `v1.4.1` chứ không phải `v1.4.2`.
+        """
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _setup_incident(
+            jira, severity=Severity.P1, action="rollback",
+            awaiting_minutes_ago=40,
+        )
+
+        with _policy_bat(), _patch_deploys(_lich_su()):
+            result = should_auto_remediate(
+                jira, jira_key,
+                severity=Severity.P1,
+                proposal_action="rollback",
+                proposal_target="service-thanh-toan",
+                proposal_params={"to_version": "v1.4.1"},
+            )
+        assert result is not None
+        assert result.params["to_version"] == "v1.4.1"
+
+    def test_khong_co_lich_su_deploy_thi_khong_ra_quyet_dinh_rollback(self):
+        """Không biết lùi về đâu → `None`, KHÔNG phải rollback "phiên bản trước".
+
+        Chuỗi "phiên bản trước" đi thẳng vào comment Jira và vào `params` của
+        lệnh thi hành. Một mệnh lệnh rollback không nói rõ về đâu thì không thi
+        hành được và cũng không kiểm chứng được — thà không quyết định.
+        """
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _setup_incident(
+            jira, severity=Severity.P1, action="scale_up",
+            awaiting_minutes_ago=40,
+        )
+
+        with _policy_bat(), _patch_deploys([]):
+            result = should_auto_remediate(
+                jira, jira_key,
+                severity=Severity.P1,
+                proposal_action="scale_up",
+                proposal_target="service-thanh-toan",
+            )
+        assert result is None
+
+    def test_tra_lich_su_dung_service_sap_bi_rollback(self):
+        """Lịch sử deploy và đích thi hành phải là CÙNG một service.
+
+        `deploy_service` (service đang có sự cố) và `proposal_target` có thể
+        khác nhau. Tra lịch sử của cái này rồi gửi lệnh tới cái kia là hạ một
+        service về phiên bản chưa từng tồn tại của nó.
+        """
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _setup_incident(
+            jira, severity=Severity.P1, action="scale_up",
+            awaiting_minutes_ago=40,
+        )
+
+        with _policy_bat(), _patch_deploys(_lich_su("service-kho-hang")) as doc_lich_su:
+            result = should_auto_remediate(
+                jira, jira_key,
+                severity=Severity.P1,
+                proposal_action="scale_up",
+                proposal_target="service-thanh-toan",
+                deploy_service="service-kho-hang",
+            )
+        assert result is not None
+        assert result.target == "service-kho-hang"
+        doc_lich_su.assert_called_once_with("service-kho-hang")
+
+    def test_de_xuat_rollback_cua_service_khac_thi_khong_tin(self):
+        """`to_version` của đề xuất chỉ dùng được khi đề xuất nói về đúng service.
+
+        Cùng lý do với test trên, chỉ khác là giá trị sai đến từ đề xuất chứ
+        không từ lịch sử deploy.
+        """
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _setup_incident(
+            jira, severity=Severity.P1, action="rollback",
+            awaiting_minutes_ago=40,
+        )
+
+        with _policy_bat(), _patch_deploys(_lich_su("service-kho-hang")):
+            result = should_auto_remediate(
+                jira, jira_key,
+                severity=Severity.P1,
+                proposal_action="rollback",
+                proposal_target="service-thanh-toan",
+                proposal_params={"to_version": "v9.9.9"},
+                deploy_service="service-kho-hang",
+            )
+        assert result is not None
+        assert result.target == "service-kho-hang"
+        assert result.params["to_version"] == "v1.4.2"
 
     def test_khong_tu_sua_khi_da_co_nguoi_phan_hoi(self):
         """Issue đã được chuyển sang Remediating bởi human → không auto."""
@@ -333,3 +540,362 @@ class TestPolicy:
             policy = AutoRemediationPolicy.from_settings()
         assert policy.enabled is True
         assert policy.timeout_minutes == 45
+
+
+# ---------------------------------------------------------------------------
+# Tests: should_fallback_rollback() — vế 3, rollback dự phòng
+# ---------------------------------------------------------------------------
+
+
+class TestShouldFallbackRollback:
+    """Auto-fix xong mà đo lại vẫn chưa đỡ thì có rollback không."""
+
+    def test_chua_du_thoi_gian_cho_thi_khong_rollback(self):
+        """Mới thi hành 1 phút → chưa được kết luận là "không ăn".
+
+        Cửa sổ PromQL `[1m]` còn nguyên phần dữ liệu lúc đang hỏng, nên đo ngay
+        gần như luôn ra "chưa đỡ" — rollback lúc này là lùi đúng một hành động
+        đang có tác dụng.
+        """
+        with _patch_deploys(_lich_su()):
+            quyet_dinh = should_fallback_rollback(
+                _auto_fix(phut_truoc=1),
+                hoi_phuc=False,
+                te_hon=False,
+                con_lai=_tin_hieu_con_lai(),
+            )
+        assert quyet_dinh is None
+
+    def test_du_dieu_kien_va_chua_do_thi_rollback_dung_phien_ban(self):
+        """Đủ thời gian chờ + đo lại CHƯA ĐỠ → rollback về v1.4.2."""
+        with _patch_deploys(_lich_su()):
+            quyet_dinh = should_fallback_rollback(
+                _auto_fix(action="restart"),
+                hoi_phuc=False,
+                te_hon=False,
+                con_lai=_tin_hieu_con_lai(),
+            )
+        assert quyet_dinh is not None
+        assert quyet_dinh.to_version == "v1.4.2"
+        assert quyet_dinh.target == "service-thanh-toan"
+        assert quyet_dinh.attempted_action == "restart"
+
+    def test_te_hon_thi_tuyet_doi_khong_rollback(self):
+        """Đo lại TỆ HƠN → dừng tay.
+
+        `verify.py` vừa ghi lên war room: "Đừng thi hành thêm hành động nào cho
+        tới khi có người xem". Rollback ngay sau câu đó là Agent tự mâu thuẫn
+        với lời nó vừa nói.
+        """
+        with _patch_deploys(_lich_su()):
+            quyet_dinh = should_fallback_rollback(
+                _auto_fix(),
+                hoi_phuc=False,
+                te_hon=True,
+                con_lai=_tin_hieu_con_lai(),
+            )
+        assert quyet_dinh is None
+
+    def test_da_hoi_phuc_thi_khong_rollback(self):
+        """Auto-fix ăn rồi → không được lùi lại thứ vừa cứu hệ thống."""
+        with _patch_deploys(_lich_su()):
+            quyet_dinh = should_fallback_rollback(
+                _auto_fix(),
+                hoi_phuc=True,
+                te_hon=False,
+                con_lai=None,
+            )
+        assert quyet_dinh is None
+
+    def test_issue_do_nguoi_duyet_thi_khong_rollback(self):
+        """Không có dấu vết auto-fix → hành động là của người duyệt.
+
+        Agent chỉ tự dọn phần chính nó tự quyết. Người duyệt chọn hành động thì
+        người đó theo tới cùng — tự lùi giúp là lấy mất quyền quyết định, đúng
+        thứ cổng HITL sinh ra để bảo vệ.
+        """
+        with _patch_deploys(_lich_su()):
+            quyet_dinh = should_fallback_rollback(
+                None,
+                hoi_phuc=False,
+                te_hon=False,
+                con_lai=_tin_hieu_con_lai(),
+            )
+        assert quyet_dinh is None
+
+    def test_auto_fix_von_da_la_rollback_thi_khong_rollback_lan_hai(self):
+        """P1/P2 đã bị ép rollback ở vế 1 → không lùi thêm một phiên bản nữa."""
+        with _patch_deploys(_lich_su()):
+            quyet_dinh = should_fallback_rollback(
+                _auto_fix(action="rollback"),
+                hoi_phuc=False,
+                te_hon=False,
+                con_lai=_tin_hieu_con_lai(),
+            )
+        assert quyet_dinh is None
+
+    def test_da_rollback_du_phong_roi_thi_thoi(self):
+        """Mỗi issue đúng MỘT lần — không lặp vòng này qua vòng khác."""
+        with _patch_deploys(_lich_su()):
+            quyet_dinh = should_fallback_rollback(
+                _auto_fix(),
+                hoi_phuc=False,
+                te_hon=False,
+                con_lai=_tin_hieu_con_lai(),
+                da_rollback_du_phong=True,
+            )
+        assert quyet_dinh is None
+
+    def test_khong_co_lich_su_thi_van_quyet_dinh_nhung_khong_co_phien_ban(self):
+        """Không tra được phiên bản → vẫn trả quyết định, `to_version=None`.
+
+        "Có nên rollback" và "rollback về đâu" là hai câu hỏi khác nhau. Câu đầu
+        đã trả lời là CÓ, nên người trực phải được biết — họ là người duy nhất
+        tra lịch sử deploy bằng tay được lúc 3 giờ sáng.
+        """
+        with _patch_deploys([]):
+            quyet_dinh = should_fallback_rollback(
+                _auto_fix(),
+                hoi_phuc=False,
+                te_hon=False,
+                con_lai=_tin_hieu_con_lai(),
+            )
+        assert quyet_dinh is not None
+        assert quyet_dinh.to_version is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: execute_fallback_rollback()
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteFallbackRollback:
+    """Thi hành rollback dự phòng và ghi comment."""
+
+    def _quyet_dinh(self, jira_key: str, to_version: str | None):
+        from src.services.auto_remediation import FallbackRollbackDecision
+
+        return FallbackRollbackDecision(
+            jira_key=jira_key,
+            target="service-thanh-toan",
+            to_version=to_version,
+            attempted_action="restart",
+            con_lai=_tin_hieu_con_lai(),
+        )
+
+    def test_comment_phan_biet_duoc_voi_auto_fix_lan_dau(self):
+        """Comment phải nêu: đã thử gì, đo lại ra sao, lùi về phiên bản nào.
+
+        Ba đường đi tới production (người duyệt, Agent tự thi hành, Agent lùi
+        lại) dẫn tới ba kết luận khác nhau khi viết postmortem, nên đọc Jira
+        phải phân biệt được.
+        """
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _setup_incident(jira)
+
+        ket_qua = execute_fallback_rollback(jira, self._quyet_dinh(jira_key, "v1.4.2"))
+
+        assert ket_qua is not None
+        assert ket_qua.succeeded is True
+        assert ket_qua.approved_by == AUTO_APPROVED_BY
+        comment = "\n".join(jira.get_comment_bodies(jira_key))
+        assert FALLBACK_MARKER in comment
+        assert AUTO_MARKER not in comment  # khác hẳn comment auto-fix lần đầu
+        assert "restart" in comment  # hành động đã thử
+        assert "0.97" in comment  # chỉ số đo lại
+        assert "v1.4.2" in comment  # lùi về đâu
+
+    def test_khong_co_phien_ban_thi_chi_comment_giai_thich(self):
+        """`to_version=None` → không thi hành gì, nhưng phải nói vì sao."""
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _setup_incident(jira)
+
+        ket_qua = execute_fallback_rollback(jira, self._quyet_dinh(jira_key, None))
+
+        assert ket_qua is None
+        comment = "\n".join(jira.get_comment_bodies(jira_key))
+        assert FALLBACK_MARKER in comment
+        assert "không xác định được phiên bản" in comment.lower()
+
+
+# ---------------------------------------------------------------------------
+# Tests: tích hợp trong `scripts/run_agent.py`
+#
+# Đặt trong file này vì chúng nghiệm thu cùng một tính năng, và `run_agent.py`
+# chỉ là chỗ nối dây — không có test riêng cho nó.
+# ---------------------------------------------------------------------------
+
+
+def _incident_da_thi_hanh(jira: FakeJiraClient) -> str:
+    """Một issue Agent đã tự thi hành xong, đang chờ đo lại."""
+    jira_key = _setup_incident(jira, severity=Severity.P3, action="restart")
+    jira.transition(jira_key, IncidentState.REMEDIATING)
+    return jira_key
+
+
+class TestNoiVaoRunAgent:
+    """`_kiem_tra_auto_remediation()` và `_verify_da_thi_hanh()`."""
+
+    def test_loi_khi_xet_auto_remediation_khong_giet_ca_tien_trinh(self):
+        """`should_auto_remediate()` ném lỗi → nuốt, đi tiếp issue khác.
+
+        Hàm đó đi hỏi changelog Jira và đọc `deploy_history` — hai đường ra
+        ngoài. `main()` chỉ bắt `KeyboardInterrupt`, nên một exception lọt tới
+        đây là giết cả tiến trình Agent giữa lúc đang có sự cố. Cùng lập luận
+        với `_xet_nang_muc()` trong `incident_graph.py`.
+        """
+        from scripts.run_agent import _kiem_tra_auto_remediation
+
+        jira = FakeJiraClient(verbose=False)
+        key_loi = _setup_incident(jira)
+        key_lanh = _setup_incident(jira)
+        awaiting = {key_loi, key_lanh}
+        da_thi_hanh: set[str] = set()
+
+        def hong(_jira, jira_key, **_kwargs):
+            if jira_key == key_loi:
+                raise RuntimeError("Jira 429 Too Many Requests")
+            return None
+
+        with patch("scripts.run_agent.should_auto_remediate", side_effect=hong) as xet:
+            _kiem_tra_auto_remediation(jira, awaiting, da_thi_hanh)
+
+        # Không ném ra ngoài, và issue lành trong cùng vòng vẫn được xét.
+        assert xet.call_count == 2
+        # Issue lỗi không bị đánh dấu đã thi hành — vòng sau còn thử lại.
+        assert da_thi_hanh == set()
+        assert awaiting == {key_loi, key_lanh}
+
+    def test_chua_du_thoi_gian_cho_thi_chua_do_lai(self):
+        """Issue mới auto-fix → chưa đo, chưa kết luận, chưa rollback.
+
+        Bỏ qua chứ không kết luận: `da_verify` để trống nên vòng sau xét lại.
+        """
+        from scripts.run_agent import _verify_da_thi_hanh
+
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _incident_da_thi_hanh(jira)
+        da_verify: set[str] = set()
+        da_rollback: set[str] = set()
+        auto = {jira_key: _auto_fix(jira_key=jira_key, phut_truoc=1)}
+
+        with patch("scripts.run_agent.verify") as do_lai, _patch_deploys(_lich_su()):
+            _verify_da_thi_hanh(None, jira, {jira_key}, da_verify, auto, da_rollback)
+
+        do_lai.assert_not_called()
+        assert da_verify == set()
+        assert da_rollback == set()
+
+    def test_chua_do_thi_rollback_va_do_lai_dung_mot_lan_nua(self):
+        """Đủ điều kiện → rollback, rồi cho `verify()` chạy lại đúng một lần."""
+        from scripts.run_agent import _verify_da_thi_hanh
+
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _incident_da_thi_hanh(jira)
+        da_verify: set[str] = set()
+        da_rollback: set[str] = set()
+        auto = {jira_key: _auto_fix(jira_key=jira_key, action="restart")}
+
+        with patch(
+            "scripts.run_agent.verify", return_value=_ket_qua_verify()
+        ), _patch_deploys(_lich_su()):
+            _verify_da_thi_hanh(None, jira, {jira_key}, da_verify, auto, da_rollback)
+
+        comment = "\n".join(jira.get_comment_bodies(jira_key))
+        assert FALLBACK_MARKER in comment
+        assert "v1.4.2" in comment
+        assert da_rollback == {jira_key}
+        # Chưa kết luận xong: còn phải đo lại sau khi rollback.
+        assert da_verify == set()
+        # Dấu vết được cập nhật thành `rollback` để chính nó chặn lần hai.
+        assert auto[jira_key].action == "rollback"
+
+    def test_hai_vong_lien_tiep_chi_rollback_mot_lan(self):
+        """Gọi lại ngay vòng sau → không rollback thêm lần nào nữa."""
+        from scripts.run_agent import _verify_da_thi_hanh
+
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _incident_da_thi_hanh(jira)
+        da_verify: set[str] = set()
+        da_rollback: set[str] = set()
+        auto = {jira_key: _auto_fix(jira_key=jira_key, action="restart")}
+
+        with patch(
+            "scripts.run_agent.verify", return_value=_ket_qua_verify()
+        ), _patch_deploys(_lich_su()):
+            _verify_da_thi_hanh(None, jira, {jira_key}, da_verify, auto, da_rollback)
+            # Vòng hai: giả lập đã đủ thời gian đo lại sau rollback, để lần này
+            # thật sự đi tới `should_fallback_rollback()` chứ không dừng ở cổng
+            # thời gian — tức là kiểm đúng cái chốt "chỉ một lần".
+            auto[jira_key] = dataclasses.replace(
+                auto[jira_key],
+                at=datetime.now(UTC) - timedelta(minutes=NGUONG_CHO_DO_LAI_PHUT + 1),
+            )
+            _verify_da_thi_hanh(None, jira, {jira_key}, da_verify, auto, da_rollback)
+
+        so_lan = sum(
+            1 for c in jira.get_comment_bodies(jira_key) if FALLBACK_MARKER in c
+        )
+        assert so_lan == 1
+        # Vòng hai đã kết luận xong — không đo nữa.
+        assert da_verify == {jira_key}
+
+    def test_khong_co_lich_su_thi_khong_rollback_nhung_van_giai_thich(self):
+        """Không tra được phiên bản → không thi hành, nhưng comment nói rõ."""
+        from scripts.run_agent import _verify_da_thi_hanh
+
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _incident_da_thi_hanh(jira)
+        da_verify: set[str] = set()
+        da_rollback: set[str] = set()
+        auto = {jira_key: _auto_fix(jira_key=jira_key, action="restart")}
+
+        with patch(
+            "scripts.run_agent.verify", return_value=_ket_qua_verify()
+        ), _patch_deploys([]):
+            _verify_da_thi_hanh(None, jira, {jira_key}, da_verify, auto, da_rollback)
+
+        comment = "\n".join(jira.get_comment_bodies(jira_key))
+        assert FALLBACK_MARKER in comment
+        assert "không xác định được phiên bản" in comment.lower()
+        # Không có gì đổi trên production → không cần đo lại lần nữa.
+        assert da_verify == {jira_key}
+        assert da_rollback == {jira_key}
+
+    def test_issue_do_nguoi_duyet_khong_bi_dong_toi(self):
+        """Không có dấu vết auto-fix → luồng verify y hệt trước 18/08."""
+        from scripts.run_agent import _verify_da_thi_hanh
+
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _incident_da_thi_hanh(jira)
+        da_verify: set[str] = set()
+
+        with patch(
+            "scripts.run_agent.verify", return_value=_ket_qua_verify()
+        ), _patch_deploys(_lich_su()):
+            _verify_da_thi_hanh(None, jira, {jira_key}, da_verify)
+
+        comment = "\n".join(jira.get_comment_bodies(jira_key))
+        assert FALLBACK_MARKER not in comment
+        assert da_verify == {jira_key}
+
+    def test_loi_khi_rollback_du_phong_khong_giet_ca_tien_trinh(self):
+        """Lỗi ở bước rollback dự phòng → nuốt, issue vẫn được kết luận."""
+        from scripts.run_agent import _verify_da_thi_hanh
+
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _incident_da_thi_hanh(jira)
+        da_verify: set[str] = set()
+        da_rollback: set[str] = set()
+        auto = {jira_key: _auto_fix(jira_key=jira_key, action="restart")}
+
+        with patch(
+            "scripts.run_agent.verify", return_value=_ket_qua_verify()
+        ), patch(
+            "scripts.run_agent.should_fallback_rollback",
+            side_effect=RuntimeError("Postgres timeout"),
+        ):
+            _verify_da_thi_hanh(None, jira, {jira_key}, da_verify, auto, da_rollback)
+
+        assert da_verify == {jira_key}
+        assert da_rollback == set()
