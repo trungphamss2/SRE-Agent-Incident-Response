@@ -45,6 +45,7 @@ from src.services.meeting_room import DailyRoomClient, build_room_client  # noqa
 from src.services.postmortem_generator import generate_postmortem  # noqa: E402
 from src.services.postmortem_report import build_detailed_report, build_email_body  # noqa: E402
 from src.services.prometheus import PrometheusClient  # noqa: E402
+from src.services.auto_remediation import execute_auto_remediation, should_auto_remediate  # noqa: E402
 from src.services.remediation import UnsupportedActionError, execute, is_already_remediated  # noqa: E402
 from src.services.status_updater import status_approved  # noqa: E402
 
@@ -172,6 +173,69 @@ def _verify_da_thi_hanh(
         # tự đóng là lấy đi bước đó, và cùng tinh thần với cổng HITL — nó báo cáo,
         # người quyết định.
         da_verify.add(jira_key)
+
+
+def _kiem_tra_auto_remediation(
+    jira: JiraClient,
+    awaiting_keys: set[str],
+    already_executed: set[str],
+) -> None:
+    """Kiểm tra timeout và tự thi hành nếu không ai phản hồi.
+
+    Module `auto_remediation` quyết định có nên auto-fix không dựa trên:
+    - Feature có bật không (`AUTO_REMEDIATION_ENABLED`)
+    - Issue đã chờ quá thời gian timeout chưa
+    - Đã có human phản hồi chưa
+
+    Chạy SAU `poll_jira_approvals()` trong loop: human luôn được ưu tiên trước.
+    Nếu human đã duyệt ở `poll_jira_approvals()` thì `already_executed` đã có
+    key đó và vòng này không xét nữa.
+
+    Nuốt lỗi từng issue — cùng lý do với `_verify_da_thi_hanh()`.
+    """
+    for jira_key in sorted(awaiting_keys - already_executed):
+        try:
+            incident = jira.get_incident(jira_key)
+        except Exception as loi:
+            logger.debug("%s: chưa đọc được để kiểm auto-remediation (%s)", jira_key, loi)
+            continue
+        if incident is None or incident.proposal is None:
+            continue
+
+        decision = should_auto_remediate(
+            jira,
+            jira_key,
+            severity=incident.severity,
+            proposal_action=incident.proposal.action,
+            proposal_target=incident.proposal.target,
+            proposal_params=incident.proposal.params,
+            deploy_service=incident.affected_services[0] if incident.affected_services else None,
+        )
+        if decision is None:
+            continue
+
+        logger.warning(
+            "⏰ AUTO-REMEDIATION: %s — %s → %s (%s)",
+            decision.jira_key,
+            decision.action,
+            decision.target,
+            decision.reason,
+        )
+
+        try:
+            result = execute_auto_remediation(jira, decision)
+            logger.info(
+                "⏰ %s: auto-remediation %s — %s",
+                jira_key,
+                "thành công" if result.succeeded else "THẤT BẠI",
+                result.detail,
+            )
+        except Exception as loi:
+            logger.error("%s: lỗi khi auto-remediation (%s)", jira_key, loi)
+            continue
+
+        already_executed.add(jira_key)
+        awaiting_keys.discard(jira_key)
 
 
 def poll_jira_approvals(
@@ -425,6 +489,12 @@ def main() -> int:
             # Poll Jira: kiểm tra xem có ticket nào được người duyệt chưa
             if awaiting_keys - already_executed:
                 poll_jira_approvals(jira, awaiting_keys, already_executed)
+
+            # Auto-remediation: nếu đã chờ quá lâu mà không ai phản hồi thì Agent
+            # tự sửa. Chạy SAU poll_jira_approvals để ưu tiên human trước.
+            # Feature mặc định TẮT, bật bằng AUTO_REMEDIATION_ENABLED=1.
+            if awaiting_keys - already_executed:
+                _kiem_tra_auto_remediation(jira, awaiting_keys, already_executed)
 
             # Đo lại những ticket đã thi hành khắc phục — xem có thật sự đỡ không.
             #

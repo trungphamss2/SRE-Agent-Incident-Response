@@ -83,6 +83,16 @@ class Settings(BaseSettings):
     # cố tự duyệt, và hành động bị từ chối. Xem src/services/hitl.py.
     jira_agent_account_id: str = ""
 
+    # Auto-remediation khi timeout (mặc định TẮT)
+    #
+    # Khi bật: nếu sự cố đã chờ duyệt quá `auto_remediation_timeout_minutes`
+    # phút mà không có human phản hồi, Agent tự thi hành khắc phục.
+    # - P3/P4: dùng đúng hành động đã đề xuất
+    # - P1/P2: ép rollback về version trước
+    # Xem src/services/auto_remediation.py.
+    auto_remediation_enabled: bool = False
+    auto_remediation_timeout_minutes: int = 30
+
     # Email — gửi báo cáo Postmortem sau khi sự cố resolved
     #
     # Dùng Gmail SMTP + App Password. Tạo App Password tại:
