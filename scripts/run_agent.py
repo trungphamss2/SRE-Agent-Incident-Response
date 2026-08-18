@@ -52,6 +52,7 @@ from src.services.email_client import Attachment, GmailClient  # noqa: E402
 from src.services.hitl import ApprovalError, assert_human_approved  # noqa: E402
 from src.services.incident_alert import IncidentAlerter, build_alerter  # noqa: E402
 from src.services.jira import FakeJiraClient, JiraClient, RealJiraClient  # noqa: E402
+from src.services.jira.mapping import FIXED_BY_HUMAN_LABEL  # noqa: E402
 from src.services.meeting_room import DailyRoomClient, build_room_client  # noqa: E402
 from src.services.postmortem_generator import generate_postmortem  # noqa: E402
 from src.services.postmortem_report import build_detailed_report, build_email_body  # noqa: E402
@@ -478,6 +479,11 @@ def _execute_approved(jira: JiraClient, jira_key: str, approved_by: str) -> None
 
     # 5. Sinh postmortem + gửi email
     if result.succeeded:
+        # Nhãn NGƯỜI: đường này chỉ tới được sau `assert_human_approved()`, tức
+        # đã có người thật chuyển trạng thái. `approved_by` là bằng chứng sẵn có
+        # tại đây — không phải suy đoán lại từ comment hay từ changelog.
+        _gan_nhan_da_fix(jira, jira_key, FIXED_BY_HUMAN_LABEL)
+
         _try_send_postmortem(jira, jira_key)
 
         # 6. Chuyển sang Resolved
@@ -486,6 +492,21 @@ def _execute_approved(jira: JiraClient, jira_key: str, approved_by: str) -> None
             logger.info("✅ %s: chuyển sang Resolved", jira_key)
         except Exception:
             logger.warning("%s: không chuyển được sang Resolved — kéo tay trên Jira", jira_key)
+
+
+def _gan_nhan_da_fix(jira: JiraClient, jira_key: str, nhan: str) -> None:
+    """Gắn nhãn "ai đã khắc phục", nuốt lỗi nếu Jira không nhận.
+
+    Nhãn chỉ để **đếm bằng JQL** — comment war room đã kể đủ chuyện cho người
+    đọc. Nên mất nhãn là mất một dòng thống kê, còn ném exception ra giữa
+    `_execute_approved()` là bỏ dở postmortem và bước chuyển sang Resolved của
+    một sự cố vừa được khắc phục xong. Cùng cách xử lý với `add_comment()` và
+    `transition()` trong `auto_remediation.py`.
+    """
+    try:
+        jira.add_label(jira_key, nhan)
+    except Exception as loi:
+        logger.warning("%s: không gắn được nhãn %s (%s)", jira_key, nhan, loi)
 
 
 def _try_send_postmortem(jira: JiraClient, jira_key: str) -> bool:

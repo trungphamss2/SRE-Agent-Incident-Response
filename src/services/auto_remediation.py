@@ -1,6 +1,6 @@
 """Auto-remediation khi timeout — Agent tự sửa nếu không ai phản hồi.
 
-CHỦ SỞ HỮU: Việt
+CHỦ SỞ HỮU: Việt. Nhãn `fixed-by-agent` do Long thêm ngày 18/08 ở hai hàm thi hành.
 
 ## Vì sao có module này
 
@@ -45,6 +45,7 @@ from datetime import UTC, datetime, timedelta
 from src.config import get_settings
 from src.models.incident import IncidentSignal, IncidentState, Severity
 from src.services import deploys, runbooks
+from src.services.jira.mapping import FIXED_BY_AGENT_LABEL
 from src.services.remediation import RemediationResult, execute
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,25 @@ class AutoRemediationDecision:
     reason: str
     #: `True` nếu hành động bị ép rollback (P1/P2), khác với đề xuất gốc.
     forced_rollback: bool
+
+
+def _danh_dau_agent_da_fix(jira, jira_key: str) -> None:  # jira: JiraClient
+    """Gắn nhãn `fixed-by-agent` lên issue, nuốt lỗi nếu Jira không nhận.
+
+    Nuốt lỗi y như `add_comment()` và `transition()` ngay dưới đây, và cùng lý
+    do: hành động khắc phục đã chạy xong trên production rồi. Mất một cái nhãn
+    thì tệ nhất là thiếu một dòng trong bảng thống kê; ném exception ra thì
+    người gọi tưởng việc khắc phục hỏng.
+
+    Chỉ gọi khi thi hành THÀNH CÔNG — nhãn "được Agent khắc phục" trên một hành
+    động thất bại là nhãn nói dối, và nó đi thẳng vào số liệu báo cáo.
+    """
+    try:
+        jira.add_label(jira_key, FIXED_BY_AGENT_LABEL)
+    except Exception as error:
+        logger.warning(
+            "%s: không gắn được nhãn %s (%s)", jira_key, FIXED_BY_AGENT_LABEL, error
+        )
 
 
 def _is_human_responded(
@@ -308,6 +328,9 @@ def execute_auto_remediation(
         params=decision.params,
     )
 
+    if result.succeeded:
+        _danh_dau_agent_da_fix(jira, decision.jira_key)
+
     # Post comment lên Jira — phân biệt rõ với human-approved.
     comment = (
         f"⚠️ **{AUTO_MARKER}**\n\n"
@@ -342,8 +365,6 @@ def execute_auto_remediation(
 
 # ---------------------------------------------------------------------------
 # Vế 3 — rollback dự phòng khi auto-fix không ăn
-#
-# CHỦ SỞ HỮU: Việt
 #
 # Hai vế trên khép lại ở chỗ "đã thi hành". Vế này khép chỗ "thi hành xong mà sự
 # cố vẫn còn": Agent đã tự quyết một lần rồi, nên nó cũng phải tự chịu trách
@@ -539,6 +560,10 @@ def execute_fallback_rollback(
         approved_by=AUTO_APPROVED_BY,
         params={"to_version": decision.to_version},
     )
+
+    # Cùng nhãn với lần tự thi hành đầu: rollback dự phòng vẫn là Agent tự quyết.
+    if result.succeeded:
+        _danh_dau_agent_da_fix(jira, decision.jira_key)
 
     comment = (
         f"🔁 **{FALLBACK_MARKER}**\n\n"

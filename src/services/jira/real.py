@@ -1,5 +1,7 @@
 """`RealJiraClient` — cài đặt [contract ③](client.py) trên Jira Cloud thật.
 
+CHỦ SỞ HỮU: Đức. Method `add_label()` do Long thêm ngày 18/08 cho nhóm nhãn `fixed-by-*`.
+
 Thay `FakeJiraClient` bằng class này là Agent chạy với Jira thật, không phải sửa
 code Agent (đó là mục đích của Protocol).
 
@@ -47,6 +49,7 @@ from src.services.jira.mapping import (
     jira_status_for,
     jql_open_incidents,
     labels_for,
+    merge_label,
     replace_severity_label,
     retitle_severity,
     service_from_labels,
@@ -449,6 +452,27 @@ class RealJiraClient:
                     "summary": retitle_severity(summary_cu, severity)[:250],
                 }
             },
+        )
+
+    def add_label(self, jira_key: str, label: str) -> None:
+        """Gắn thêm một nhãn, giữ nguyên nhãn cũ.
+
+        GET rồi PUT cả danh sách, y hệt `set_severity()` — Jira API ghi `labels`
+        là ghi đè toàn bộ. PUT thẳng `[label]` là xoá mất `incident`,
+        `severity-*`, `service-*`, và issue rơi khỏi mọi JQL của war room.
+
+        Đọc rồi ghi nên có cửa sổ đua: hai tiến trình cùng gắn nhãn cho một issue
+        thì nhãn của người ghi trước có thể bị mất. Chấp nhận, vì đúng một issue
+        chỉ có một đường thi hành thắng — `is_already_remediated()` đã chặn đường
+        thứ hai trước khi tới đây — và vì đây là cách `set_severity()` đã làm từ
+        04/08. Đổi sang một cơ chế khác thì phải đổi cả hai chỗ, không phải chỗ này.
+        """
+        issue = self._call("GET", f"/rest/api/3/issue/{jira_key}?fields=labels")
+        labels_cu = (issue.get("fields", {}) or {}).get("labels", []) or []
+        self._call(
+            "PUT",
+            f"/rest/api/3/issue/{jira_key}",
+            {"fields": {"labels": merge_label(labels_cu, label)}},
         )
 
     def get_transition_author(self, jira_key: str, to_state: IncidentState) -> str | None:

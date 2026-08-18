@@ -167,6 +167,51 @@ def test_hanh_dong_khong_duoc_phep_thi_400(jira: FakeJiraClient):
     assert "không được phép" in response.json()["detail"]
 
 
+# ------------------------------------------------------- nhãn ai đã khắc phục
+
+
+def test_duyet_qua_webhook_thi_gan_nhan_nguoi(jira: FakeJiraClient, incident_key: str):
+    """Khắc phục qua webhook = có người duyệt → nhãn NGƯỜI, không phải Agent.
+
+    Nhãn là thứ duy nhất **đếm được bằng JQL**; comment war room đọc bằng mắt
+    thì rõ nhưng không truy vấn được. Thiếu lời gọi ở đây là thủng dữ liệu, vì
+    webhook là một trong ba đường thi hành thật.
+    """
+    from src.services.jira.mapping import FIXED_BY_AGENT_LABEL, FIXED_BY_HUMAN_LABEL
+
+    jira.approve_as_human(incident_key)
+
+    assert _post({"issue": {"key": incident_key}}).status_code == 200
+
+    nhan = jira.get_labels(incident_key)
+    assert FIXED_BY_HUMAN_LABEL in nhan
+    assert FIXED_BY_AGENT_LABEL not in nhan
+    # Nhãn cũ còn nguyên — issue không được rơi khỏi JQL tìm war room.
+    assert "incident" in nhan
+    assert "severity-P2" in nhan
+
+
+def test_loi_jira_luc_gan_nhan_khong_pha_webhook(
+    jira: FakeJiraClient, incident_key: str, monkeypatch: pytest.MonkeyPatch
+):
+    """Jira ném lỗi lúc gắn nhãn → nuốt, webhook vẫn trả 200.
+
+    Ném ra đây là HTTP 5xx, mà Jira Automation thấy 5xx thì gọi lại webhook —
+    tức thi hành remediation lần hai. Đổi một dòng thống kê lấy một lần
+    remediation trùng là đánh đổi sai.
+    """
+    def hong(jira_key: str, label: str) -> None:
+        raise JiraApiError("PUT /issue → HTTP 429", status_code=429)
+
+    monkeypatch.setattr(jira, "add_label", hong)
+    jira.approve_as_human(incident_key)
+
+    response = _post({"issue": {"key": incident_key}})
+
+    assert response.status_code == 200
+    assert response.json()["succeeded"] is True
+
+
 # -------------------------------------------------------------- parse payload
 
 
