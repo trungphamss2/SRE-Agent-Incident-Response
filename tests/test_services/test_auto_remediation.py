@@ -899,3 +899,112 @@ class TestNoiVaoRunAgent:
 
         assert da_verify == {jira_key}
         assert da_rollback == set()
+
+
+# ---------------------------------------------------------------------------
+# Tests: B1 regression — escalate KHÔNG phá nhánh P3/P4
+# ---------------------------------------------------------------------------
+
+
+class TestB1EscalationBypass:
+    """B1: `escalate` nâng P3→P1 trước phút 30, nhưng auto-remediation phải
+    dùng severity GỐC (lúc phát hiện) chứ không phải severity hiện tại.
+
+    Trước fix: `_kiem_tra_auto_remediation` truyền `incident.severity` (đã
+    bị escalate) → P3 vào nhánh P1 → ép rollback thay vì dùng đề xuất gốc.
+
+    Sau fix: dùng `incident.signal.severity` — mức Rule Engine ban đầu.
+    """
+
+    def test_p3_bi_nang_len_p1_van_dung_de_xuat_goc(self):
+        """P3 bị escalate lên P1 → auto-remediation vẫn dùng restart (đề xuất
+        gốc), KHÔNG ép rollback."""
+        from scripts.run_agent import _kiem_tra_auto_remediation
+
+        jira = FakeJiraClient(verbose=False)
+        # Tạo incident P3, đề xuất restart
+        jira_key = _setup_incident(
+            jira, severity=Severity.P3, action="restart",
+            target="service-thanh-toan", awaiting_minutes_ago=40,
+        )
+
+        # Giả lập escalate: nâng severity lên P1 (như escalate node làm)
+        jira.set_severity(jira_key, Severity.P1)
+
+        # Xác nhận severity hiện tại đã là P1
+        incident = jira.get_incident(jira_key)
+        assert incident.severity == Severity.P1
+        # Nhưng severity gốc vẫn là P3
+        assert incident.signal.severity == Severity.P3
+
+        awaiting = {jira_key}
+        already_executed: set[str] = set()
+        auto_records: dict[str, AutoFixRecord] = {}
+
+        with _policy_bat(), _patch_deploys(_lich_su()):
+            _kiem_tra_auto_remediation(
+                jira, awaiting, already_executed, auto_records
+            )
+
+        # PHẢI đã thi hành
+        assert jira_key in already_executed
+
+        # PHẢI dùng hành động gốc (restart), KHÔNG phải rollback
+        assert jira_key in auto_records
+        record = auto_records[jira_key]
+        assert record.action == "restart", (
+            f"Mong restart (đề xuất gốc P3) nhưng nhận {record.action} — "
+            "nghĩa là severity bị escalate vẫn chi phối quyết định"
+        )
+
+    def test_p4_bi_nang_len_p2_van_dung_de_xuat_goc(self):
+        """P4 bị escalate lên P2 → vẫn dùng đề xuất gốc, không ép rollback."""
+        from scripts.run_agent import _kiem_tra_auto_remediation
+
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _setup_incident(
+            jira, severity=Severity.P4, action="scale_up",
+            target="service-thanh-toan", awaiting_minutes_ago=40,
+        )
+
+        # Escalate P4 → P2
+        jira.set_severity(jira_key, Severity.P2)
+
+        awaiting = {jira_key}
+        already_executed: set[str] = set()
+        auto_records: dict[str, AutoFixRecord] = {}
+
+        with _policy_bat(), _patch_deploys(_lich_su()):
+            _kiem_tra_auto_remediation(
+                jira, awaiting, already_executed, auto_records
+            )
+
+        assert jira_key in already_executed
+        assert auto_records[jira_key].action == "scale_up"
+
+    def test_p1_thuc_su_van_ep_rollback(self):
+        """P1 thật (không phải bị escalate lên) → vẫn ép rollback."""
+        from scripts.run_agent import _kiem_tra_auto_remediation
+
+        jira = FakeJiraClient(verbose=False)
+        jira_key = _setup_incident(
+            jira, severity=Severity.P1, action="restart",
+            target="service-thanh-toan", awaiting_minutes_ago=40,
+        )
+
+        # Severity gốc = P1, severity hiện tại = P1 (không escalate)
+        incident = jira.get_incident(jira_key)
+        assert incident.signal.severity == Severity.P1
+
+        awaiting = {jira_key}
+        already_executed: set[str] = set()
+        auto_records: dict[str, AutoFixRecord] = {}
+
+        with _policy_bat(), _patch_deploys(_lich_su()):
+            _kiem_tra_auto_remediation(
+                jira, awaiting, already_executed, auto_records
+            )
+
+        assert jira_key in already_executed
+        assert auto_records[jira_key].action == "rollback"
+
