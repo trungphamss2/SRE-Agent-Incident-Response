@@ -102,7 +102,7 @@ BA ĐIỂM KHÁC BIỆT
 
 ### Dùng slides thế nào
 
-- **Trình chiếu:** mở `pitch-deck.html` bằng Chrome, bấm `F11` toàn màn hình, điều hướng bằng `←` `→` (hoặc `Space`). Thanh vạch trên cùng cho biết đang ở slide thứ mấy.
+- **Trình chiếu:** mở `pitch-deck.html` bằng Chrome, bấm `F11` toàn màn hình, điều hướng bằng `←` `→` (hoặc `Space`, hoặc hai nút *Trước / Sau* dưới khung). Trên điện thoại thì vuốt ngang.
 - **Xuất PDF để nộp:** `Ctrl+P` → Destination *Save as PDF* → Layout **Landscape** → Margins **None** → bật **Background graphics** (thiếu mục này thì nền tối mất sạch, chữ sáng trên giấy trắng sẽ không đọc được).
 - **Deep link tới một slide:** thêm `#s7` vào cuối đường dẫn để mở thẳng slide 7.
 
