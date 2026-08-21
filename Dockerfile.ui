@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Chỉ cài deps cho UI
+COPY ui/requirements.txt /app/ui/requirements.txt
+RUN pip install --no-cache-dir -r ui/requirements.txt
+
+# Copy đúng thư mục UI
+COPY ui/ /app/ui/
+COPY .streamlit/ /app/.streamlit/
+
+EXPOSE 8501
+
+# Streamlit Cloud-style: chạy từ gốc repo để .streamlit/config.toml được đọc
+CMD ["streamlit", "run", "ui/status_page.py", \
+     "--server.port=8501", \
+     "--server.address=0.0.0.0", \
+     "--server.headless=true", \
+     "--browser.gatherUsageStats=false"]
