@@ -99,7 +99,7 @@ def _status_rong() -> dict:
     ).model_dump(mode="json")
 
 
-@pytest.mark.parametrize("ten_module", ["ui.war_room", "ui.status_page", "ui.labels"])
+@pytest.mark.parametrize("ten_module", ["ui.pages.war_room", "ui.status_page", "ui.labels"])
 def test_trang_ui_import_duoc(ten_module: str):
     """Thiếu dependency hay gãy import là đỏ ở đây, không phải đỏ lúc demo."""
     if str(GOC_REPO) not in sys.path:
@@ -149,7 +149,7 @@ def test_khong_mo_san_su_co_da_dong():
     nguồn vì logic chọn nằm ở cấp module, chạy lúc import, không gói trong hàm
     nào để gọi lại được.
     """
-    nguon = (GOC_REPO / "ui" / "war_room.py").read_text(encoding="utf-8")
+    nguon = (GOC_REPO / "ui" / "pages" / "war_room.py").read_text(encoding="utf-8")
 
     assert "dau_tien = cho_duyet or dang_mo" in nguon, "không tìm thấy logic chọn phiếu mở sẵn"
     assert "or (ds[0] if ds else None)" not in nguon, (

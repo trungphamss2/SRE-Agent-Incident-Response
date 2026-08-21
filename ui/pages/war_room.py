@@ -83,16 +83,10 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-# `streamlit run ui/war_room.py` đặt **thư mục ui/** vào sys.path, KHÔNG đặt thư
-# mục gốc repo — nên `from ui import labels` sẽ ném ModuleNotFoundError khi chạy
-# thật, dù pytest import được bình thường (pytest tự thêm rootdir).
-#
-# Đo được ngày 06/08: mô phỏng lại sys.path của streamlit thì đúng là
-# `ModuleNotFoundError: No module named 'ui'`. Loại lỗi "test xanh mà chạy thật
-# vỡ" — cùng họ với vụ `.env` làm test đỏ theo máy hôm 05/08.
-#
-# Cùng cách `scripts/run_agent.py` đang làm.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+# File này nằm ở `ui/pages/war_room.py` — Streamlit multi-page tự phát hiện và
+# phục vụ nó tại URL `/war_room`. `streamlit run ui/status_page.py` đặt thư mục
+# `ui/` vào sys.path, nhưng từ `pages/` cần lên 3 cấp mới tới gốc repo.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 from ui import labels, theme  # noqa: E402
 

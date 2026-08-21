@@ -41,6 +41,7 @@ import html
 import os
 import pathlib
 import sys
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -131,6 +132,29 @@ body { overflow-y: auto; }
 }
 .o-so .con-so.bad { color: var(--p1); }
 .o-so .con-so .dv { font-family: var(--font-body); font-size: 12.5px; color: var(--ink-1); }
+
+/* ═══ Nút chuyển sang War Room ═══ */
+.btn-war-room {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 10px 18px;
+  background: var(--p1);
+  color: #fff; font-size: 13px; font-weight: 600;
+  border: none; border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  font-family: var(--font-body);
+  letter-spacing: 0.01em;
+  width: 100%;
+  justify-content: center;
+}
+.btn-war-room:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(229, 72, 77, 0.35);
+}
+.btn-war-room:active { transform: translateY(0); }
+.btn-war-room svg { flex-shrink: 0; }
 
 /* ═══ Chân trang ═══ */
 .chan {
@@ -313,10 +337,22 @@ def the_service(svc: dict, incident: dict | None, bang_up: dict[str, float] | No
     tin_html = f'<div class="tin">{e(tin)}</div>' if tin and tin != cau else ""
 
     ma_su_co = ""
+    nut_war_room = ""
     if svc.get("active_incident"):
+        ma = svc["active_incident"]
         ma_su_co = (
             f'<div class="ma-phieu">Mã sự cố đang xử lý: '
-            f'<span class="inline-code">{e(svc["active_incident"])}</span></div>'
+            f'<span class="inline-code">{e(ma)}</span></div>'
+        )
+        # Nút CTA nổi bật: chuyển sang War Room với đúng incident đang xử lý.
+        # War room nằm ở `ui/pages/war_room.py` — Streamlit multi-page phục vụ
+        # nó tại `/war_room` cùng origin. JS dựng URL từ `data-war-key`.
+        nut_war_room = (
+            f'<button class="btn-war-room" type="button" '
+            f'data-war-key="{e(ma)}" '
+            f'title="Mở War Room — xem chi tiết sự cố {e(ma)}">'
+            f'{theme.ICON["set"]}Xem chi tiết sự cố'
+            f'{theme.ICON["mui_ten"]}</button>'
         )
     return (
         f'<div class="svc{lop}">'
@@ -327,6 +363,7 @@ def the_service(svc: dict, incident: dict | None, bang_up: dict[str, float] | No
         f"{ma_su_co}"
         f"{khoi_chi_so(incident)}"
         f"{khoi_up(svc['name'], bang_up)}"
+        f"{nut_war_room}"
         "</div>"
     )
 
@@ -460,6 +497,23 @@ TRANG = f"""<!DOCTYPE html>
 <script>
 {theme.JS_THEME}
 document.getElementById('btn-reload').addEventListener('click', function () {{ taiLai(); }});
+
+// ═══ Nút "Xem chi tiết sự cố" → chuyển sang War Room ═══
+// War room nằm cùng Streamlit app tại `/war_room` (multi-page). JS dựng URL
+// tương đối từ origin của parent, không cần biến `WAR_ROOM_URL`.
+document.querySelectorAll('.btn-war-room').forEach(function (nut) {{
+  nut.addEventListener('click', function () {{
+    var key = nut.getAttribute('data-war-key');
+    if (!key) return;
+    try {{
+      var base = window.parent.location.origin;
+      window.parent.location.href = base + '/war_room?key=' + encodeURIComponent(key);
+    }} catch (err) {{
+      // Fallback: mở tab mới nếu sandbox quá chặt.
+      window.open('/war_room?key=' + encodeURIComponent(key), '_blank');
+    }}
+  }});
+}});
 </script>
 </body>
 </html>

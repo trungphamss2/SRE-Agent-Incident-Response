@@ -2,12 +2,12 @@
 
 **Chủ sở hữu: Long**
 
-Hai trang Streamlit.
+Hai trang Streamlit — **chỉ cần deploy một lệnh** nhờ Streamlit multi-page.
 
 | File | Vai trò | Ai xem |
 |---|---|---|
-| `status_page.py` | Status page công khai | Người dùng dịch vụ — không cần đăng nhập |
-| `war_room.py` | War-room view nội bộ | On-call / IC |
+| `status_page.py` | Status page công khai (trang chính) | Người dùng dịch vụ — không cần đăng nhập |
+| `pages/war_room.py` | War-room view nội bộ (tự động phục vụ tại `/war_room`) | On-call / IC |
 | `labels.py` | Bảng dịch thuật ngữ kỹ thuật sang tiếng Việt | — |
 | `theme.py` | Design token, icon, mảnh CSS dùng chung | — |
 
@@ -26,8 +26,11 @@ trang lệch nhau, mà lệch màu thì không có test nào bắt được.
 ```bash
 pip install -r ui/requirements.txt
 streamlit run ui/status_page.py        # mở ở localhost:8501
-streamlit run ui/war_room.py
+# War room tự có tại localhost:8501/war_room (Streamlit multi-page)
 ```
+
+Khi dịch vụ có sự cố, thẻ dịch vụ trên status page hiện nút **"Xem chi tiết sự cố"** —
+nhấn vào là chuyển thẳng sang war room với đúng incident đó.
 
 ## Dữ liệu đã có sẵn — không cần chờ ai
 
