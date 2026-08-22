@@ -5,7 +5,9 @@ ba lớp bảo vệ. `test_agent_tu_duyet_bi_tu_choi_qua_webhook` là test tươ
 với ràng buộc bắt buộc của đề bài, ở tầng HTTP.
 """
 
+import os
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -609,3 +611,44 @@ def test_resolved_skip_khi_da_co_postmortem(jira_with_smtp: FakeJiraClient):
     assert body["resolution"] == "already_handled"
     assert body["postmortem_sent"] is False
 
+
+
+def test_health_bao_commit_dang_chay():
+    """`/health` phải nói đang chạy commit nào, không chỉ "ok".
+
+    Trước 22/08 nó chỉ trả `status` + `env`, nên câu "Render đã deploy commit mới
+    chưa" không ai trả lời được từ bên ngoài — phải mở dashboard. Và
+    `docs/START-HERE.md` đã ghi sẵn một cạm bẫy có thật: merge PR trên web thì repo
+    mirror tụt lại, Render chạy code cũ, mà dashboard vẫn báo deploy thành công.
+
+    `RENDER_GIT_COMMIT` do Render tự bơm. Ngoài Render thì trả `"local"` — nói thật
+    là không biết, hơn là đọc `git` lúc chạy rồi báo commit của thư mục làm việc
+    chứ không phải của bản đã build.
+    """
+    from fastapi.testclient import TestClient
+
+    from src.main import app
+
+    with patch.dict(
+        os.environ, {"RENDER_GIT_COMMIT": "abc1234def5678", "RENDER_GIT_BRANCH": "develop"}
+    ):
+        body = TestClient(app).get("/health").json()
+
+    assert body["status"] == "ok"
+    assert body["commit"] == "abc1234", "phải rút ngắn còn 7 ký tự như git short sha"
+    assert body["branch"] == "develop"
+
+
+def test_health_ngoai_render_khong_bao_commit_gia():
+    """Không có `RENDER_GIT_COMMIT` thì trả "local", không đoán."""
+    from fastapi.testclient import TestClient
+
+    from src.main import app
+
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("RENDER_GIT_COMMIT", None)
+        os.environ.pop("RENDER_GIT_BRANCH", None)
+        body = TestClient(app).get("/health").json()
+
+    assert body["commit"] == "local"
+    assert body["branch"] == "local"
