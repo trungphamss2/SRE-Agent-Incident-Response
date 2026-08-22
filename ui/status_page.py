@@ -41,7 +41,6 @@ import html
 import os
 import pathlib
 import sys
-import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -412,8 +411,32 @@ def _tham_so(ten: str, mac_dinh: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 # `set_page_config` phải chạy trước mọi lệnh Streamlit khác.
-st.set_page_config(page_title="Trạng thái dịch vụ", page_icon="P035", layout="wide")
+st.set_page_config(
+    page_title="Trạng thái dịch vụ",
+    page_icon="P035",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 st.markdown(theme.CSS_KHUNG, unsafe_allow_html=True)
+
+# Ẩn thanh điều hướng multi-page của Streamlit trên trang CÔNG KHAI.
+#
+# Từ 22/08 war room nằm ở `ui/pages/war_room.py`, nên Streamlit tự liệt kê nó ở
+# sidebar của trang này — tức trang cho khách hàng tự quảng cáo trang nội bộ, nơi
+# có số đo, log, đề xuất khắc phục và TÊN NGƯỜI DUYỆT.
+#
+# ⚠️ Đây là che, KHÔNG phải phân quyền. War room không có xác thực, nên ai biết
+# `/war_room` là vào được. Ghi ra để không ai đọc đoạn này rồi tưởng đã an toàn —
+# muốn an toàn thật thì cần đăng nhập, chưa có. Xem `docs/demo-runbook.md`.
+#
+# Nút "Xem chi tiết sự cố" thì GIỮ: nó là chủ ý, để người trực không phải nhớ hai
+# địa chỉ.
+st.markdown(
+    """<style>
+    [data-testid="stSidebarNav"] { display: none; }
+    </style>""",
+    unsafe_allow_html=True,
+)
 
 theme_hien = _tham_so("theme", "dark")
 if theme_hien not in ("dark", "light"):
@@ -505,12 +528,25 @@ document.querySelectorAll('.btn-war-room').forEach(function (nut) {{
   nut.addEventListener('click', function () {{
     var key = nut.getAttribute('data-war-key');
     if (!key) return;
-    try {{
-      var base = window.parent.location.origin;
-      window.parent.location.href = base + '/war_room?key=' + encodeURIComponent(key);
-    }} catch (err) {{
-      // Fallback: mở tab mới nếu sandbox quá chặt.
-      window.open('/war_room?key=' + encodeURIComponent(key), '_blank');
+    // `window.open` là ĐƯỜNG CHÍNH, không phải đường lùi.
+    //
+    // Gán `parent.location.href` là điều hướng cấp cao nhất, mà sandbox của
+    // iframe Streamlit KHÔNG có `allow-top-navigation`. Lấy từ chính bundle đang
+    // cài (streamlit/static/.../js): allow-forms · allow-modals · allow-popups ·
+    // allow-popups-to-escape-sandbox · allow-same-origin · allow-scripts ·
+    // allow-downloads. Không có top-navigation.
+    //
+    // Và Chrome chặn nó ÂM THẦM — chỉ log console, KHÔNG ném exception. Nên
+    // `catch` không chạy, đường lùi không bao giờ tới, và nút không làm gì cả.
+    // Cùng loại lỗi đã vá ngày 17/08 ở war room, khi đó phải dùng
+    // `history.replaceState()` + `location.reload()`.
+    //
+    // `allow-popups` CÓ trong danh sách, nên `window.open` chạy được.
+    var duong = '/war_room?key=' + encodeURIComponent(key);
+    var w = window.open(duong, '_blank');
+    if (!w) {{
+      // Trình duyệt chặn popup: thử điều hướng iframe, ít nhất có phản hồi.
+      try {{ window.top.location.href = duong; }} catch (err) {{ window.location.href = duong; }}
     }}
   }});
 }});
