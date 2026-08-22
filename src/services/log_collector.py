@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import subprocess
+from dataclasses import dataclass
 
 from src.models.incident import LogEvidence
 
@@ -135,18 +137,28 @@ def collect_container_logs(
     return _parse_and_filter(raw_output, container_name, max_lines)
 
 
-def collect_logs_for_service(
-    service: str,
-    start_time: str,
-    end_time: str,
-) -> list[LogEvidence]:
-    """Thu thập log cho một service — thử nhiều tên container phổ biến.
+#: Vì sao danh sách rỗng. Chuỗi rỗng nghĩa là KHÔNG rỗng — có log.
+#:
+#: Bốn trạng thái này khác nhau về bản chất và cần nói ra khác nhau, nhất là ở
+#: war room: "chưa thấy dòng lỗi nào" là BẰNG CHỨNG, còn "máy này không có
+#: Docker" là Agent đang mù. Gộp cả hai thành một dòng "không có log" là ném đi
+#: thông tin mà cả hệ thống đã trả tiền để lấy.
+LY_DO_KHONG_DOCKER = "khong-co-docker"
+LY_DO_KHONG_CONTAINER = "khong-co-container"
+LY_DO_LOG_SACH = "log-sach"
 
-    Docker Compose đặt tên container theo format ``<project>-<service>-1``
-    hoặc ``<service>``. Hàm này thử tất cả các mẫu phổ biến.
-    """
-    # Các tên container phổ biến trong docker-compose demo
-    candidates = [
+
+@dataclass(frozen=True)
+class KetQuaThuThap:
+    """Log thu được, kèm lý do khi không thu được gì."""
+
+    logs: list[LogEvidence]
+    ly_do: str = ""
+
+
+def _ten_container_co_the(service: str) -> list[str]:
+    """Các tên container Docker Compose có thể đặt cho một service."""
+    return [
         service,
         f"p035-demo-{service}-1",
         f"p035-demo_{service}_1",
@@ -155,10 +167,39 @@ def collect_logs_for_service(
         f"{service}-1",
     ]
 
+
+def thu_thap_co_ly_do(
+    service: str,
+    start_time: str,
+    end_time: str,
+    *,
+    max_lines: int = MAX_LOG_LINES,
+) -> KetQuaThuThap:
+    """Như `collect_logs_for_service()` nhưng nói luôn VÌ SAO khi không có gì.
+
+    Tách ra để war room hiển thị được đúng câu: người trực mở phiếu thấy khung
+    log trống cần biết ngay là "service này không ghi dòng lỗi nào" hay "trang
+    đang chạy ở chỗ không với tới được container" — hai chuyện dẫn tới hai hành
+    động hoàn toàn khác nhau.
+
+    `max_lines` nới được vì trần mặc định 50 sinh ra để **tiết kiệm token LLM**,
+    mà người đọc war room thì không tốn token nào. Trần thấp ở đó còn nguy hiểm:
+    một cửa sổ đầy `pool_in_use=` có thể đẩy traceback ra khỏi 50 dòng đầu.
+    """
+    candidates = _ten_container_co_the(service)
+
     for name in candidates:
-        evidence = collect_container_logs(name, start_time, end_time)
+        evidence = collect_container_logs(name, start_time, end_time, max_lines=max_lines)
         if evidence:
-            return evidence
+            return KetQuaThuThap(evidence)
+
+    # Không có Docker CLI thì mọi `docker logs` ở trên đã nuốt `FileNotFoundError`
+    # và trả rỗng — không phân biệt được với "log sạch" nếu chỉ nhìn kết quả.
+    # Đây là đường chạy THƯỜNG XUYÊN, không phải ngoại lệ hiếm: bản API deploy
+    # trên Render không có Docker và không thấy container demo nào.
+    if shutil.which("docker") is None:
+        logger.info("Không có Docker CLI trên máy này — không thu thập được log của %s", service)
+        return KetQuaThuThap([], LY_DO_KHONG_DOCKER)
 
     # Phân biệt hai chuyện KHÁC NHAU về bản chất, trước đây bị gộp thành một
     # thông báo duy nhất:
@@ -174,8 +215,7 @@ def collect_logs_for_service(
     # tên container và làm người đọc đi sửa đúng chỗ không hỏng.
     #
     # Khác biệt này còn quan trọng với chuỗi ba cửa chặn: log sạch là bằng chứng
-    # CHỐNG LẠI giả thuyết lỗi ứng dụng. Báo thành "không có log" là ném đi thông
-    # tin mà Agent đã trả tiền để lấy.
+    # CHỐNG LẠI giả thuyết lỗi ứng dụng.
     co_that = _container_dang_chay(candidates)
     if co_that:
         logger.info(
@@ -186,9 +226,25 @@ def collect_logs_for_service(
             start_time,
             end_time,
         )
-    else:
-        logger.info("Không tìm thấy container nào cho service %s (đã thử: %s)", service, candidates)
-    return []
+        return KetQuaThuThap([], LY_DO_LOG_SACH)
+
+    logger.info("Không tìm thấy container nào cho service %s (đã thử: %s)", service, candidates)
+    return KetQuaThuThap([], LY_DO_KHONG_CONTAINER)
+
+
+def collect_logs_for_service(
+    service: str,
+    start_time: str,
+    end_time: str,
+) -> list[LogEvidence]:
+    """Thu thập log cho một service — thử nhiều tên container phổ biến.
+
+    Docker Compose đặt tên container theo format ``<project>-<service>-1``
+    hoặc ``<service>``. Hàm này thử tất cả các mẫu phổ biến.
+
+    Chỉ trả danh sách; cần biết VÌ SAO rỗng thì dùng `thu_thap_co_ly_do()`.
+    """
+    return thu_thap_co_ly_do(service, start_time, end_time).logs
 
 
 def _container_dang_chay(candidates: list[str]) -> list[str]:

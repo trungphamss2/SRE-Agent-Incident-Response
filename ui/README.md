@@ -42,9 +42,10 @@ https://p-035-incident-agent.onrender.com
 
 | Endpoint | Trả về |
 |---|---|
-| `GET /api/status` | 2 service + trạng thái → cho `status_page.py` |
+| `GET /api/status` | 4 service + trạng thái → cho `status_page.py` |
 | `GET /api/incidents` | Danh sách incident → cho `war_room.py` |
 | `GET /api/incidents/INC-12` | Chi tiết 1 incident: giả thuyết, bằng chứng, timeline |
+| `GET /api/incidents/INC-12/logs` | Log thô đọc TƯƠI từ container theo cửa sổ sự cố → khối "Log gốc" trong war room. ⚠️ Chỉ có dữ liệu khi API chạy trên máy có demo stack; bản Render không có Docker nên luôn trả rỗng kèm `ly_do` |
 
 Xem trước JSON trước khi code:
 
@@ -60,7 +61,7 @@ Hình dạng JSON là [contract ④](../docs/contracts/README.md) — sẽ **kh�
 
 ## Thứ tự làm
 
-**1. `status_page.py` trước** — đơn giản nhất, có ngay kết quả nhìn thấy được. Chỉ cần đọc `/api/status` và hiện 2 service với màu.
+**1. `status_page.py` trước** — đơn giản nhất, có ngay kết quả nhìn thấy được. Chỉ cần đọc `/api/status` và hiện 4 service với màu.
 
 **2. `war_room.py` sau** — danh sách incident + chi tiết.
 

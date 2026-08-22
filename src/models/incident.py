@@ -89,6 +89,31 @@ class LogEvidence(BaseModel):
     )
 
 
+class IncidentLogs(BaseModel):
+    """Log thô của một sự cố, đọc TƯƠI lúc mở phiếu — không phải bản Agent đã lưu.
+
+    Khác `Hypothesis.log_evidence` ở hai điểm quan trọng:
+
+    1. `log_evidence` là ảnh chụp lúc Agent chẩn đoán, và chỉ được lưu lên Jira
+       khi log **đổi được kết luận** (xem `_post_lai_neu_log_doi_ket_luan`). Nên
+       phần lớn sự cố không có dòng nào, kể cả khi Agent đã đọc log thật.
+    2. Cái này đọc lại từ container tại thời điểm mở phiếu, theo đúng cửa sổ của
+       sự cố — sự cố còn mở thì cửa sổ kéo tới **bây giờ**, nên thấy được dòng
+       đang chảy ra lúc này.
+
+    `ly_do` khác rỗng nghĩa là `logs` rỗng, và nói vì sao — xem các hằng
+    `LY_DO_*` trong `src/services/log_collector.py`.
+    """
+
+    jira_key: str
+    service: str
+    start: datetime
+    end: datetime
+    dang_mo: bool = Field(default=False, description="Sự cố còn đang mở — cửa sổ kéo tới hiện tại")
+    ly_do: str = Field(default="", description="Vì sao không có log; rỗng nghĩa là có")
+    logs: list[LogEvidence] = Field(default_factory=list)
+
+
 class IncidentSignal(BaseModel):
     """Tín hiệu phát hiện sự cố — output của node `detect`.
 
