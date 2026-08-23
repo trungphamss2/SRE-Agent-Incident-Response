@@ -2016,7 +2016,7 @@ def the_promql(signal: dict, luc: str | None) -> str:
     return (
         '<div class="evidence">'
         '<div class="toggle-section">'
-        '<button class="toggle-btn" type="button" onclick="this.parentElement.classList.toggle(\'open\')">' 
+        '<button class="toggle-btn" type="button" onclick="this.parentElement.classList.toggle(\'open\')">'
         '<span class="toggle-icon">▶</span> Câu truy vấn dán vào Prometheus</button>'
         f'<div class="toggle-content">{noi_dung}</div>'
         '</div></div>'
@@ -2585,7 +2585,6 @@ def view_su_co(inc: dict, kho: dict, dang_chon: bool = False) -> str:
     da_xong = inc.get("state") not in DANG_XAY_RA
     signal = inc.get("signal") or {}
     hypotheses = inc.get("hypotheses") or []
-    postmortem = inc.get("postmortem") or {}
     chuoi = (kho.get("chuoi") or {}).get(khoa)
     anh_huong = (kho.get("anh_huong") or {}).get(khoa, ("—", "chưa đo"))
     luc = inc.get("detected_at")

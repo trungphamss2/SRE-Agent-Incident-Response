@@ -973,6 +973,10 @@ Cuối ngày dọn nốt chỗ lệch tông giữa hai trang: tách `ui/theme.py
 | Việt | Vá 2 lỗi cấu hình chặn Agent: `DATABASE_URL` trỏ cổng 5432 trong khi Postgres map ra 55432 (mất bằng chứng deploy), và LLM 402 vì không đặt `max_tokens` nên bị giữ chỗ theo trần 8192 token | ✅ Done | `.env`, `llm_max_tokens` mặc định 2048 |
 | Việt | Sửa `PROM_PUBLIC_URL` tách khỏi `PROM_URL`: link "Mở trên Prometheus" do trình duyệt mở nên không dùng được `localhost` | ✅ Done | `ui/pages/war_room.py` |
 
+| Việt | Cài lại `pre-push` hook (`bash scripts/setup_hooks.sh`) — hook chưa từng tồn tại trên clone này nên AI log ghi đủ vào `.ai-log/session.jsonl` (~1MB) mà **chưa bao giờ nộp lên server chấm**. Nộp bù 568 mục tồn, server trả `202` | ✅ Done | deliverable #4 |
+| Việt | Vá 2 cảnh báo ruff trong `ui/pages/war_room.py` — CI chạy `ruff check ui/` nên chúng sẽ làm đỏ PR `viet → develop` | ✅ Done | ruff sạch trên đúng phạm vi CI kiểm |
+| Việt | Cài `demo/requirements.txt` vào venv chính cho khớp CI — `tests/test_services/test_demo_services.py` trước đó không collect được vì thiếu `prometheus_client` | ✅ Done | **665 test pass** (654 + 11) |
+
 **Tổng kết ngày:** Hai đợt. Đợt sáng (`b666e15`, +1.212 dòng): biểu đồ Prometheus realtime, API `/incidents/{key}/logs`. Đợt chiều: **bỏ Render, chuyển hẳn sang tự host qua Cloudflare Tunnel** — 3 subdomain, vòng HITL nghiệm thu thật trên KAN-85. Status page thành SPA nhịp 2 giây, không còn tải lại trang.
 
 Ba lỗi đáng ghi lại vì đều thuộc loại **im lặng trả sai**, nguy hiểm hơn crash:
