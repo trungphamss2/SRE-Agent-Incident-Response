@@ -38,6 +38,7 @@ from src.models.incident import (
     Incident,
     IncidentSignal,
     IncidentState,
+    LogEvidence,
     Postmortem,
     RemediationProposal,
     Severity,
@@ -326,6 +327,16 @@ class RealJiraClient:
         )
         self.transition(jira_key, IncidentState.INVESTIGATING)
 
+    def post_logs(self, jira_key: str, body: str, logs: list[LogEvidence]) -> None:
+        self._comment_with_payload(
+            jira_key,
+            body,
+            {
+                _PAYLOAD_KEY: "logs",
+                "data": {"logs": [le.model_dump(mode="json") for le in logs]},
+            },
+        )
+
     def post_proposal(self, jira_key: str, proposal: RemediationProposal) -> None:
         from src.services.status_updater import status_proposed
         self._comment_with_payload(
@@ -605,6 +616,12 @@ class RealJiraClient:
                     incident.signal = IncidentSignal.model_validate(data)
                 elif kind == "hypothesis":
                     incident.hypotheses.append(Hypothesis.model_validate(data))
+                elif kind == "logs":
+                    # Gộp dồn: `analyze_logs` chạy lại ở mỗi vòng quét khi sự cố
+                    # còn mở, nên một phiếu có thể có nhiều comment loại này.
+                    incident.log_evidence.extend(
+                        LogEvidence.model_validate(dong) for dong in data.get("logs") or []
+                    )
                 elif kind == "postmortem":
                     incident.postmortem = Postmortem.model_validate(data)
                 elif kind == "proposal":

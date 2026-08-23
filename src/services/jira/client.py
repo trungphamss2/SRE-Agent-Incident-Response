@@ -29,6 +29,7 @@ from src.models.incident import (
     Incident,
     IncidentSignal,
     IncidentState,
+    LogEvidence,
     Postmortem,
     RemediationProposal,
     Severity,
@@ -59,6 +60,14 @@ class JiraClient(Protocol):
     def post_hypothesis(self, jira_key: str, hypothesis: Hypothesis) -> None:
         """Post giả thuyết nguyên nhân kèm bằng chứng số."""
         ...
+
+    def post_logs(self, jira_key: str, body: str, logs: list[LogEvidence]) -> None:
+        """Post comment "đã thu thập log" kèm chính các dòng log, để đọc lại được.
+
+        Tách khỏi `add_comment()` vì phần log phải **lưu được dưới dạng dữ liệu**,
+        không chỉ là chữ cho người đọc: log container trôi mất rất nhanh, nên đây
+        là bản duy nhất còn lại khi mở phiếu sau đó vài chục phút.
+        """
 
     def post_proposal(self, jira_key: str, proposal: RemediationProposal) -> None:
         """Post đề xuất khắc phục và chuyển issue sang `Awaiting Approval`.
@@ -268,6 +277,13 @@ class FakeJiraClient:
             incident.state = IncidentState.INVESTIGATING
         self._append_timeline(jira_key, "agent", "giả thuyết", hypothesis.statement)
         self._log(f"{jira_key} giả thuyết ({hypothesis.confidence:.0%}): {hypothesis.statement}")
+
+    def post_logs(self, jira_key: str, body: str, logs: list[LogEvidence]) -> None:
+        incident = self._incidents.get(jira_key)
+        if incident is not None:
+            incident.log_evidence = list(logs)
+        self._append_timeline(jira_key, "agent", "thu thập log", f"{len(logs)} dòng")
+        self._log(f"{jira_key} thu thập {len(logs)} dòng log")
 
     def post_proposal(self, jira_key: str, proposal: RemediationProposal) -> None:
         incident = self._incidents.get(jira_key)
