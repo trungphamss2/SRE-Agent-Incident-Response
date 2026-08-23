@@ -546,7 +546,7 @@ body { overflow: hidden; }
 }
 .chart-legend .item { display: flex; align-items: center; gap: 6px; }
 .chart-legend .swatch { width: 10px; height: 2px; border-radius: 1px; }
-.chart-svg { width: 100%; height: 200px; }
+.chart-svg { width: 100%; height: auto; display: block; font-family: var(--font-body); }
 .chart-foot {
   display: flex; justify-content: space-between;
   padding-top: 8px;
@@ -1880,15 +1880,15 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
         vi_sao = (chuoi or {}).get("loi") or "Prometheus không với tới được"
         than = (
             f"{luoi}"
-            f'<text x="{rong / 2}" y="{cao / 2 - 6}" font-family="Inter" font-size="12" '
+            f'<text x="{rong / 2}" y="{cao / 2 - 6}" font-family="Inter, sans-serif" font-size="12" '
             f'fill="var(--ink-2)" text-anchor="middle">Chưa vẽ được đường nào</text>'
-            f'<text x="{rong / 2}" y="{cao / 2 + 14}" font-family="JetBrains Mono" font-size="10" '
+            f'<text x="{rong / 2}" y="{cao / 2 + 14}" font-family="Inter, sans-serif" font-size="10" '
             f'fill="var(--ink-3)" text-anchor="middle">{e(str(vi_sao)[:90])}</text>'
         )
         chan = "<span>—</span>" * 5
         return (
             f'<div class="chart-panel">{dau_de}'
-            f'<svg class="chart-svg" viewBox="0 0 {rong} {cao}" preserveAspectRatio="none">{than}</svg>'
+            f'<svg class="chart-svg" viewBox="0 0 {rong} {cao}" preserveAspectRatio="xMidYMid meet">{than}</svg>'
             f'<div class="chart-foot">{chan}</div></div>'
         )
 
@@ -1920,7 +1920,7 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
         lop_nguong = (
             f'<line x1="0" y1="{y:.0f}" x2="{rong}" y2="{y:.0f}" stroke="var(--p1)" '
             f'stroke-width="1" stroke-dasharray="4 4" opacity="0.55"/>'
-            f'<text x="6" y="{y - 5:.0f}" font-family="JetBrains Mono" font-size="9" '
+            f'<text x="6" y="{y - 5:.0f}" font-family="Inter, sans-serif" font-size="9" '
             f'fill="var(--p1)" opacity="0.85">ngưỡng {nguong:g}</text>'
         )
     lop_nen = ""
@@ -1945,7 +1945,7 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
         lop_moc += (
             f'<line x1="{x:.0f}" y1="0" x2="{x:.0f}" y2="{cao}" stroke="{mau}" '
             f'stroke-width="1" opacity="0.4" stroke-dasharray="2 3"/>'
-            f'<text x="{x + lech_chu:.0f}" y="14" font-family="JetBrains Mono" font-size="9" '
+            f'<text x="{x + lech_chu:.0f}" y="14" font-family="Inter, sans-serif" font-size="9" '
             f'fill="{mau}" text-anchor="{neo}">{e(chu)}</text>'
         )
 
@@ -1976,7 +1976,7 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
     chan = "".join(f"<span>{e(n)}</span>" for n in nhan_gio)
     return (
         f'<div class="chart-panel">{dau_de}'
-        f'<svg class="chart-svg" viewBox="0 0 {rong} {cao}" preserveAspectRatio="none">{than}</svg>'
+        f'<svg class="chart-svg" viewBox="0 0 {rong} {cao}" preserveAspectRatio="xMidYMid meet">{than}</svg>'
         f'<div class="chart-foot">{chan}</div></div>'
     )
 

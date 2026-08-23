@@ -952,4 +952,19 @@ Cuối ngày dọn nốt chỗ lệch tông giữa hai trang: tách `ui/theme.py
 
 ---
 
+## 2026-08-23
+
+| Member | Task | Status | Output |
+|--------|------|--------|--------|
+| Việt | Status page: thêm biểu đồ Prometheus realtime (Chart.js qua CDN) — 3 chỉ số/service (latency, error rate, throughput), tự đổi màu theo theme, xử lý `NaN` + mất CDN | ✅ Done | `b666e15`, `ui/status_page.py` +541 dòng |
+| Việt | War room: cải thiện hiển thị — mở rộng thêm chức năng và sửa layout | ✅ Done | `b666e15`, `ui/pages/war_room.py` +355 dòng |
+| Việt | API mới `GET /api/incidents/{key}/logs`: đọc log tươi từ container theo cửa sổ sự cố, model `IncidentLogs` kèm lý do khi rỗng | ✅ Done | `b666e15`, `src/api/incidents.py` +154, `src/models/incident.py` +25 |
+| Việt | Refactor `log_collector`: tách `thu_thap_co_ly_do()` — phân biệt 3 trạng thái rỗng (không Docker, không container, log sạch) thay vì gộp thành một | ✅ Done | `b666e15`, `src/services/log_collector.py` +92 dòng |
+| Việt | Mở rộng `demo/loadtest.py`: thêm kịch bản test mới | ✅ Done | `b666e15`, +106 dòng |
+| Việt | Cập nhật fixture `status.json` + `ui/labels.py` + `ui/theme.py` cho phù hợp giao diện mới | ✅ Done | `b666e15` |
+
+**Tổng kết ngày:** Commit lớn nhất của Việt: +1.212 dòng, 13 file. Status page có biểu đồ Prometheus realtime bằng Chart.js — dữ liệu do Python hỏi hộ (iframe `srcdoc` không gọi thẳng Prometheus được vì khác origin). API mới `/incidents/{key}/logs` đọc log tươi từ container, phân biệt rõ 3 lý do khi rỗng (không Docker / không container / log sạch) để war room hiển thị đúng câu. War room mở rộng thêm chức năng hiển thị.
+
+---
+
 <!-- Format: copy block trên cho mỗi ngày làm việc -->

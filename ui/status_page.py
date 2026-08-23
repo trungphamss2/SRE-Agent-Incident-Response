@@ -565,9 +565,12 @@ def the_service(
         # Nói thẳng là chưa biết, và nói vì sao — người xem không phải đoán xem
         # thẻ trống nghĩa là "ổn" hay "hỏng".
         tin_html = (
-            '<div class="tin">Bản API đang chạy chưa trả dịch vụ này về, nên chưa có '
-            "trạng thái để hiển thị. Các ô số bên dưới vẫn là số đo thật nếu hỏi được "
-            "Prometheus.</div>"
+            '<div class="tin"><strong>Không có nghĩa là dịch vụ đang hỏng.</strong> '
+            "Dịch vụ vẫn chạy — ô <code>up</code> ngay bên dưới là bằng chứng. Chỉ là "
+            f"bản API tại <span class=\"inline-code\">{e(API)}</span> chưa liệt kê dịch "
+            "vụ này trong <code>/api/status</code>, nên trang chưa có trạng thái "
+            "sức khoẻ để hiển thị. Đây là hai nguồn khác nhau: thẻ trạng thái đọc từ "
+            "API, còn các ô số đọc thẳng từ Prometheus.</div>"
         )
 
     ma_su_co = ""
@@ -708,6 +711,8 @@ st.markdown(theme.CSS_KHUNG, unsafe_allow_html=True)
 st.markdown(
     """<style>
     [data-testid="stSidebarNav"] { display: none; }
+    [data-testid="stSidebar"] { display: none; }
+    [data-testid="collapsedControl"] { display: none; }
     </style>""",
     unsafe_allow_html=True,
 )
