@@ -1,4 +1,4 @@
-# Cấu hình Prometheus scrape 2 service demo.
+# Cấu hình Prometheus scrape 4 service demo.
 #
 # ⚠️ Label `service` dưới đây là contract ① giữa Trung và Việt. Agent query
 # `... by (le, service)` nên đổi giá trị này là Agent không tìm thấy gì — mà

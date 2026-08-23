@@ -41,6 +41,7 @@ import html
 import os
 import pathlib
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -58,6 +59,29 @@ API = os.getenv("API_URL", "https://p-035-incident-agent.onrender.com")
 PROM_URL = os.getenv("PROM_URL", "http://localhost:9090")
 
 VN_TZ = timezone(timedelta(hours=7))  # Việt Nam không có DST, luôn UTC+7
+
+#: Danh sách dịch vụ trang này theo dõi — NGUỒN DUY NHẤT cho cả lưới thẻ lẫn
+#: lưới biểu đồ. Khớp `KNOWN_SERVICES` (src/api/incidents.py) và `scrape_configs`
+#: (demo/prometheus.yml).
+#:
+#: ⚠️ Cố ý KHÔNG chỉ đi theo `services[]` mà `/api/status` trả về. API và UI là
+#: HAI service Render deploy riêng, nên bản API đang chạy hoàn toàn có thể còn
+#: cũ hơn UI: thêm service ở backend xong, trang vẫn thiếu thẻ cho tới lượt
+#: deploy sau — mà không có lỗi nào báo ra. Đó đúng là chuyện đã xảy ra ngày
+#: 22/08 với kho-hàng và vận-chuyển.
+#:
+#: Dịch vụ nào API chưa trả về thì vẫn có thẻ, nhưng ghi rõ `HEALTH_CHUA_CO`.
+#: Không mặc định "bình thường": hiện xanh cho một dịch vụ mình không biết gì
+#: là kiểu sai tệ nhất một status page có thể mắc.
+SERVICES_THEO_DOI: tuple[str, ...] = (
+    "service-thanh-toan",
+    "service-dat-hang",
+    "service-kho-hang",
+    "service-van-chuyen",
+)
+
+#: Giá trị `health` UI tự đặt, KHÔNG thuộc contract ④ — xem `labels.HEALTH`.
+HEALTH_CHUA_CO = "chua-co-du-lieu"
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -92,7 +116,13 @@ body { overflow-y: auto; }
 .mo-dau .hang { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 
 /* ═══ Lưới thẻ dịch vụ ═══ */
-.luoi { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+/* `minmax(320px, ...)` xếp 4 thẻ thành 3 + 1 lẻ loi ở khổ 1080px. 360px đẩy
+   xuống 2 cột, thành 2×2 cân, và cùng nhịp với lưới biểu đồ bên dưới.
+
+   `min(360px, 100%)` chứ không phải `360px` trần: `minmax` với cận dưới cố
+   định KHÔNG chịu co, nên trên màn 375px cả lưới tràn ngang 99px và trang có
+   thanh cuộn ngang. `min()` cho nó rơi về đúng bề ngang khung. */
+.luoi { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 14px; }
 .svc {
   background: var(--bg-1);
   border: 1px solid var(--border);
@@ -102,6 +132,9 @@ body { overflow-y: auto; }
 }
 .svc.co-su-co { border-color: var(--p1); background: linear-gradient(180deg, var(--p1-soft) 0%, var(--bg-1) 55%); }
 .svc.suy-giam { border-color: var(--p2); background: linear-gradient(180deg, var(--p2-soft) 0%, var(--bg-1) 55%); }
+/* Dịch vụ đang theo dõi mà API chưa trả về — viền đứt để nhìn là biết thẻ này
+   nói "chưa biết", không phải "đã kiểm tra và thấy ổn". */
+.svc.chua-ro { border-style: dashed; }
 .svc .dau { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
 .svc .ten {
   font-family: var(--font-display);
@@ -155,6 +188,43 @@ body { overflow-y: auto; }
 .btn-war-room:active { transform: translateY(0); }
 .btn-war-room svg { flex-shrink: 0; }
 
+/* ═══ Ô biểu đồ, nằm trong chính thẻ dịch vụ ═══ */
+/*
+ * Trước 23/08 biểu đồ nằm ở một khối riêng dưới cuối trang. Nghĩa là muốn biết
+ * "Kho hàng đang thế nào" phải đọc thẻ ở trên, rồi cuộn xuống tìm đúng ô biểu
+ * đồ mang cùng tên — hai lần tra cứu cho một câu hỏi, và tra bằng MẮT nên rất
+ * dễ đọc nhầm sang ô bên cạnh. Giờ biểu đồ là một ô `.o-so` như mọi ô số khác
+ * trong thẻ, xếp ngay dưới ô `up` của cùng dịch vụ đó.
+ */
+.o-so-chart .tech { margin-top: 10px; }
+
+/* ⚠️ `height` đặt thẳng lên canvas KHÔNG giữ được. Chart.js chạy
+   `responsive: true` + `maintainAspectRatio: false` sẽ tự ghi đè `style` của
+   canvas theo kích thước THẺ CHA mỗi lần resize; cha lại là ô tự co theo nội
+   dung, nên hai bên đẩy nhau và canvas phình dần. Đo ngày 22/08: bốn ô cùng bề
+   ngang mà cao 327 / 446 / 327 / 446 px, lưới so le hẳn.
+
+   Cách Chart.js khuyến nghị: một khung `position: relative` có chiều cao CỐ
+   ĐỊNH, canvas trải tuyệt đối bên trong. Cha không còn co theo con nên vòng
+   phản hồi đứt. */
+.o-so-chart .khung-chart {
+  position: relative;
+  height: 210px;
+  margin-top: 4px;
+}
+.o-so-chart .khung-chart canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+.o-so-chart .khong-co {
+  text-align: center;
+  padding: 28px 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
 /* ═══ Chân trang ═══ */
 .chan {
   margin-top: 36px; padding-top: 18px;
@@ -189,8 +259,15 @@ def e(gia_tri: object) -> str:
 
 
 def fmt_time_vn(iso: str) -> str:
-    """Định dạng một chuỗi ISO 8601 (UTC) sang giờ Việt Nam, kiểu vi-VN."""
-    dt = datetime.fromisoformat(iso).astimezone(VN_TZ)
+    """Định dạng một chuỗi ISO 8601 (UTC) sang giờ Việt Nam, kiểu vi-VN.
+
+    Chuỗi rỗng hay sai định dạng thì trả `"—"`. Một cái gạch ở chân trang là
+    chuyện nhỏ; `ValueError` ở đây thì chết cả trang.
+    """
+    try:
+        dt = datetime.fromisoformat(iso).astimezone(VN_TZ)
+    except (TypeError, ValueError):
+        return "—"
     return dt.strftime("%H:%M:%S %d/%m/%Y")
 
 
@@ -200,7 +277,13 @@ def pill(chu: str, bien: str) -> str:
 
 
 #: `ServiceHealth` → biến thể pill. Giữ ánh xạ ở một chỗ thay vì rải if/else.
-_BIEN_PILL = {"operational": "ok", "degraded": "warn", "down": "bad", "maintenance": "info"}
+_BIEN_PILL = {
+    "operational": "ok",
+    "degraded": "warn",
+    "down": "bad",
+    "maintenance": "info",
+    HEALTH_CHUA_CO: "info",
+}
 
 
 @st.cache_data(ttl=10, show_spinner=False)
@@ -248,6 +331,137 @@ def load_up() -> dict[str, float] | None:
             continue
         if ten:
             ket_qua[str(ten)] = gia_tri
+    return ket_qua
+
+
+#: Các chỉ số vẽ lên biểu đồ. Mỗi tuple: (tên hiển thị, PromQL, đơn vị, màu,
+#: id trục y). Câu PromQL lấy nguyên văn theo docs/contracts/01-metrics.md.
+#:
+#: ⚠️ Ba chỉ số này KHÁC ĐƠN VỊ và lệch biên độ tới hai bậc mười: p95 quanh
+#: 0,2–5 (giây), tỷ lệ lỗi 0–100 (%), lưu lượng 0–50 (req/s). Vẽ chung MỘT trục
+#: y thì đường nào nhỏ hơn bị ép sát đáy thành một vạch phẳng — nhìn y hệt
+#: "không có dữ liệu" trong khi dữ liệu vẫn có. Nên mỗi chỉ số mang `truc` riêng.
+PROM_METRICS: list[tuple[str, str, str, str, str]] = [
+    (
+        "P95 Latency",
+        "histogram_quantile(0.95, sum by (le, service) "
+        '(rate(http_request_duration_seconds_bucket{handler!="/metrics"}[1m])))',
+        "giây",
+        "#3B82F6",
+        "y",
+    ),
+    (
+        "Error Rate 5xx",
+        # Vế `or ... * 0` là CỐ Ý, chép đúng contract ① — thiếu nó thì dịch vụ
+        # KHOẺ không có series 5xx nào, phép chia trả RỖNG, và biểu đồ mất hẳn
+        # đường "tỷ lệ lỗi" thay vì vẽ một đường 0. Nhìn ra y như hỏng.
+        # Vế NaN (mẫu số 0 khi chưa có lưu lượng) thì JS đã đổi thành khoảng
+        # trống, nên ở đây không cần `and on(service) (_HAS_TRAFFIC)`.
+        "("
+        'sum by (service) (rate(http_requests_total{handler!="/metrics", status=~"5.."}[1m]))'
+        " or "
+        'sum by (service) (rate(http_requests_total{handler!="/metrics"}[1m])) * 0'
+        ")"
+        ' / sum by (service) (rate(http_requests_total{handler!="/metrics"}[1m]))',
+        "%",
+        "#E5484D",
+        "y1",
+    ),
+    (
+        "Request/s",
+        'sum by (service) (rate(http_requests_total{handler!="/metrics"}[1m]))',
+        "req/s",
+        "#10B981",
+        "y2",
+    ),
+]
+
+#: Cửa sổ thời gian và độ mịn của biểu đồ.
+CHART_PHUT = 30
+CHART_STEP_GIAY = 15
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def load_prom_range() -> dict[str, list[dict]] | None:
+    """Chuỗi thời gian cho biểu đồ, gom theo tên dịch vụ.
+
+    Trả `{tên service: [{name, unit, color, truc, values}, ...]}` — mỗi dịch vụ
+    trong `SERVICES_THEO_DOI` luôn có một khoá. Danh sách rỗng nghĩa là
+    Prometheus chạy được nhưng chưa có series nào cho dịch vụ đó: thường vì dịch
+    vụ chưa nhận request nào ngoài `/metrics`, mà `/metrics` thì bị lọc ra.
+
+    Trả `None` chỉ khi **không câu nào** hỏi được — tức không với tới Prometheus.
+
+    ⚠️ Trước đây một câu hỏng là `return None` cho cả ba, nên chỉ cần
+    `histogram_quantile` sai cú pháp là mất sạch biểu đồ của cả bốn dịch vụ. Giữ
+    phần hỏi được thay vì vứt hết.
+    """
+    ket_thuc = time.time()
+    bat_dau = ket_thuc - CHART_PHUT * 60
+
+    theo_service: dict[str, list[dict]] = {ten: [] for ten in SERVICES_THEO_DOI}
+    hoi_duoc = 0
+
+    for ten_hien, promql, don_vi, mau, truc in PROM_METRICS:
+        try:
+            phan_hoi = requests.get(
+                f"{PROM_URL}/api/v1/query_range",
+                params={
+                    "query": promql,
+                    "start": bat_dau,
+                    "end": ket_thuc,
+                    "step": CHART_STEP_GIAY,
+                },
+                timeout=3,
+            )
+            phan_hoi.raise_for_status()
+            goi = phan_hoi.json()
+        except (requests.RequestException, ValueError):
+            continue
+        if not isinstance(goi, dict) or goi.get("status") != "success":
+            continue
+        hoi_duoc += 1
+
+        for chuoi in (goi.get("data") or {}).get("result", []):
+            nhan = chuoi.get("metric") or {}
+            ten_svc = nhan.get("service") or nhan.get("job")
+            if ten_svc not in theo_service:
+                continue
+            theo_service[ten_svc].append(
+                {
+                    "name": ten_hien,
+                    "unit": don_vi,
+                    "color": mau,
+                    "truc": truc,
+                    "values": chuoi.get("values") or [],
+                }
+            )
+
+    return theo_service if hoi_duoc else None
+
+
+def gop_services(tu_api: list[dict]) -> list[dict]:
+    """Danh sách thẻ sẽ vẽ: `SERVICES_THEO_DOI` là khung, dữ liệu API lấp vào.
+
+    Ba việc trong một hàm, đều cố ý:
+
+    1. **Thứ tự thẻ do UI quyết**, không theo thứ tự API trả về — trang không
+       đảo chỗ mỗi lần backend đổi cách sắp xếp.
+    2. **Dịch vụ API chưa trả về vẫn có thẻ**, gắn `HEALTH_CHUA_CO`. Đây là cả
+       lý do hàm này tồn tại: trước đó lưới đi thẳng theo `services[]` của API,
+       nên thêm dịch vụ ở backend mà chưa deploy lại là trang thiếu thẻ, im
+       lặng, không lỗi.
+    3. **Dịch vụ API trả về mà UI chưa biết tên** vẫn hiện, xếp cuối — thà hiện
+       một tên kỹ thuật chưa kịp dịch còn hơn giấu mất một dịch vụ.
+    """
+    con_lai = {str(svc["name"]): svc for svc in tu_api if svc.get("name")}
+    ket_qua: list[dict] = []
+    for ten in SERVICES_THEO_DOI:
+        ket_qua.append(
+            con_lai.pop(ten, None)
+            or {"name": ten, "health": HEALTH_CHUA_CO, "message": "", "active_incident": None}
+        )
+    ket_qua.extend(con_lai.values())
     return ket_qua
 
 
@@ -323,17 +537,41 @@ def khoi_up(ten_service: str, bang_up: dict[str, float] | None) -> str:
     )
 
 
-def the_service(svc: dict, incident: dict | None, bang_up: dict[str, float] | None) -> str:
-    """Một thẻ dịch vụ, HTML thuần."""
+def the_service(
+    svc: dict,
+    incident: dict | None,
+    bang_up: dict[str, float] | None,
+    chi_so: int = 0,
+    chuoi: list[dict] | None = None,
+) -> str:
+    """Một thẻ dịch vụ, HTML thuần.
+
+    Thứ tự các ô trong thẻ đi từ "cần biết" xuống "muốn đào": trạng thái → chỉ
+    số đang bất thường → Prometheus có scrape được không → biểu đồ 30 phút →
+    nút sang war room.
+    """
     suc_khoe = str(svc.get("health", ""))
     _, cau = labels.health(suc_khoe)
-    lop = {"down": " co-su-co", "degraded": " suy-giam"}.get(suc_khoe, "")
+    lop = {"down": " co-su-co", "degraded": " suy-giam", HEALTH_CHUA_CO: " chua-ro"}.get(
+        suc_khoe, ""
+    )
 
     # Backend đặt `message` = đúng câu trạng thái khi dịch vụ bình thường, nên
     # in cả hai là lặp y nguyên chữ ngay dưới cái nhãn vừa đọc. Chỉ hiện khi nó
     # nói thêm được điều gì.
     tin = str(svc.get("message", "")).strip()
     tin_html = f'<div class="tin">{e(tin)}</div>' if tin and tin != cau else ""
+    if suc_khoe == HEALTH_CHUA_CO:
+        # Nói thẳng là chưa biết, và nói vì sao — người xem không phải đoán xem
+        # thẻ trống nghĩa là "ổn" hay "hỏng".
+        tin_html = (
+            '<div class="tin"><strong>Không có nghĩa là dịch vụ đang hỏng.</strong> '
+            "Dịch vụ vẫn chạy — ô <code>up</code> ngay bên dưới là bằng chứng. Chỉ là "
+            f"bản API tại <span class=\"inline-code\">{e(API)}</span> chưa liệt kê dịch "
+            "vụ này trong <code>/api/status</code>, nên trang chưa có trạng thái "
+            "sức khoẻ để hiển thị. Đây là hai nguồn khác nhau: thẻ trạng thái đọc từ "
+            "API, còn các ô số đọc thẳng từ Prometheus.</div>"
+        )
 
     ma_su_co = ""
     nut_war_room = ""
@@ -362,7 +600,46 @@ def the_service(svc: dict, incident: dict | None, bang_up: dict[str, float] | No
         f"{ma_su_co}"
         f"{khoi_chi_so(incident)}"
         f"{khoi_up(svc['name'], bang_up)}"
+        f"{khoi_bieu_do(chi_so, str(svc['name']), chuoi)}"
         f"{nut_war_room}"
+        "</div>"
+    )
+
+
+def khoi_bieu_do(chi_so: int, ten_service: str, chuoi: list[dict] | None) -> str:
+    """Ô biểu đồ của MỘT dịch vụ, để xếp vào chính thẻ của dịch vụ đó.
+
+    `chuoi is None` nghĩa là không hỏi được Prometheus — trả chuỗi rỗng, đúng
+    quy ước của `khoi_up()`: không có số thì không dựng ô, chứ không dựng một ô
+    trống rồi để người xem đoán. Lý do chung nằm ở `ghi_chu_prom` cuối trang.
+
+    `chuoi == []` thì khác hẳn: Prometheus CHẠY, nhưng chưa có series nào cho
+    dịch vụ này. Đó là thông tin thật và đáng nói ra.
+
+    `id` của canvas là chỉ số thẻ, tên dịch vụ đi kèm ở `data-service` để JS tra
+    dữ liệu. JS cố ý KHÔNG giữ mảng tên riêng: hai danh sách song song lệch nhau
+    một phần tử là biểu đồ dán số của dịch vụ này vào tên dịch vụ khác — sai mà
+    nhìn vẫn rất bình thường.
+    """
+    if chuoi is None:
+        return ""
+
+    than = (
+        '<div class="khung-chart">'
+        f'<canvas id="chart-{chi_so}" data-service="{e(ten_service)}"></canvas></div>'
+        if chuoi
+        else f'<div class="khong-co">Prometheus không có số đo nào cho dịch vụ này '
+        f"trong {CHART_PHUT} phút gần nhất. Thường là vì nó chưa nhận request nào "
+        "ngoài lần scrape <code>/metrics</code> — mà mọi câu PromQL ở đây đều lọc "
+        "<code>/metrics</code> ra. Bắn tải bằng <code>python demo/loadtest.py</code> "
+        "là có.</div>"
+    )
+    return (
+        '<div class="o-so o-so-chart">'
+        f'<div class="nhan">Số đo {CHART_PHUT} phút gần nhất</div>'
+        f"{than}"
+        '<div class="tech"><span class="arrow">↳</span>p95 thời gian phản hồi · tỷ lệ '
+        "lỗi 5xx · lưu lượng — mỗi chỉ số một trục riêng vì khác đơn vị</div>"
         "</div>"
     )
 
@@ -434,6 +711,8 @@ st.markdown(theme.CSS_KHUNG, unsafe_allow_html=True)
 st.markdown(
     """<style>
     [data-testid="stSidebarNav"] { display: none; }
+    [data-testid="stSidebar"] { display: none; }
+    [data-testid="collapsedControl"] { display: none; }
     </style>""",
     unsafe_allow_html=True,
 )
@@ -449,6 +728,13 @@ try:
 except requests.RequestException as error:
     loi = str(error)
 
+# ⚠️ Phải có giá trị TRƯỚC khi rẽ nhánh. `TRANG` bên dưới là một f-string có
+# tham chiếu `{bieu_do_json}`, nên nhánh lỗi mà không đặt biến này là cả trang
+# chết bằng `NameError` ngay lúc dựng chuỗi — người dùng thấy MÀN HÌNH TRẮNG,
+# không đọc được chính câu "không gọi được API" mà nhánh đó vừa soạn ra. Mà
+# nhánh lỗi lại là nhánh hay gặp nhất: Render free tier ngủ sau 15 phút.
+bieu_do_json = "null"
+
 if loi:
     than = (
         '<div class="wrap"><div class="mo-dau">'
@@ -459,35 +745,55 @@ if loi:
         "giây. Nhấn <strong>Làm mới</strong> trên đầu trang để thử lại.</p></div>"
     )
 else:
-    services = data.get("services") or []
+    # Khung thẻ lấy từ `SERVICES_THEO_DOI`, không lấy thẳng `data["services"]` —
+    # xem `gop_services()`.
+    services = gop_services(data.get("services") or [])
     active_incidents = data.get("active_incidents") or []
     bang_up = load_up()
+    # Phải hỏi TRƯỚC khi dựng lưới: từ 23/08 biểu đồ nằm trong chính thẻ dịch
+    # vụ, nên `the_service()` cần chuỗi số đo ngay lúc dựng.
+    prom_data = load_prom_range()
 
     if not services:
         luoi = '<div class="note">Chưa có dịch vụ nào được theo dõi.</div>'
     else:
-        luoi = '<div class="luoi">' + "".join(
-            the_service(svc, incident_cua(svc, active_incidents), bang_up) for svc in services
-        ) + "</div>"
+        luoi = (
+            '<div class="luoi">'
+            + "".join(
+                the_service(
+                    svc,
+                    incident_cua(svc, active_incidents),
+                    bang_up,
+                    chi_so,
+                    None if prom_data is None else (prom_data.get(str(svc["name"])) or []),
+                )
+                for chi_so, svc in enumerate(services)
+            )
+            + "</div>"
+        )
 
     # Giữ lại nhưng gấp và đặt tên rõ là dành cho người trực. Đây là trang công
     # khai nên "để tham khảo khi code" đọc ra như trang chưa làm xong.
     ghi_chu_prom = ""
-    if bang_up is None:
+    if bang_up is None or prom_data is None:
         ghi_chu_prom = (
             f'<p class="hint">Không hỏi được Prometheus tại '
             f'<span class="inline-code">{e(PROM_URL)}</span> nên các thẻ không hiện ô '
-            "<code>up</code> — bình thường khi trang chạy ngoài máy có Prometheus. "
-            "Phần còn lại đọc từ API nên vẫn đủ.</p>"
+            "<code>up</code> và không có biểu đồ — bình thường khi trang chạy ngoài "
+            "máy có Prometheus. Phần còn lại đọc từ API nên vẫn đủ.</p>"
         )
     import json as _json  # noqa: PLC0415 — chỉ dùng đúng ở khối dữ liệu thô
+
+    # `_json.dumps` chứ không phải str(dict): dict Python in ra `None`/`True`,
+    # không phải `null`/`true`, và JS nuốt không nổi.
+    bieu_do_json = _json.dumps(prom_data, ensure_ascii=False) if prom_data else "null"
 
     than = (
         '<div class="wrap">'
         + khoi_mo_dau(services)
         + luoi
         + '<div class="chan">'
-        + f'<span>Cập nhật lúc {e(fmt_time_vn(data["updated_at"]))}</span>'
+        + f'<span>Cập nhật lúc {e(fmt_time_vn(str(data.get("updated_at", ""))))}</span>'
         + f'<span class="day">{e(API)}</span>'
         + "</div>"
         + '<details class="more"><summary>Dữ liệu thô (dành cho người trực)</summary>'
@@ -503,6 +809,7 @@ TRANG = f"""<!DOCTYPE html>
 <meta charset="UTF-8">
 {theme.FONTS_LINK}
 <style>{_CSS}</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -510,6 +817,8 @@ TRANG = f"""<!DOCTYPE html>
   <div class="brand"><div class="brand-mark">W</div>
   <div class="brand-text">Trạng thái <em>hệ thống</em></div></div>
   <div class="header-right">
+    <button class="hbtn" type="button" id="btn-war-room-nav"
+      title="Mở War Room">{theme.ICON["set"]}War Room</button>
     <button class="hbtn primary" type="button" id="btn-reload"
       title="Tải lại số liệu từ API">{theme.ICON["lam_moi"]}Làm mới</button>
     {theme.NUT_THEME}
@@ -521,6 +830,19 @@ TRANG = f"""<!DOCTYPE html>
 {theme.JS_THEME}
 document.getElementById('btn-reload').addEventListener('click', function () {{ taiLai(); }});
 
+// ═══ Nút War Room trên header ═══
+document.getElementById('btn-war-room-nav').addEventListener('click', function () {{
+  try {{
+    var u = new URL(window.parent.location.href);
+    u.pathname = u.pathname.replace(/[/]$/, '') + '/war_room';
+    u.search = '';
+    window.parent.history.replaceState({{}}, '', u.toString());
+    window.parent.location.reload();
+  }} catch (err) {{
+    window.open('/war_room', '_blank');
+  }}
+}});
+
 // ═══ Nút "Xem chi tiết sự cố" → chuyển sang War Room ═══
 // War room nằm cùng Streamlit app tại `/war_room` (multi-page). JS dựng URL
 // tương đối từ origin của parent, không cần biến `WAR_ROOM_URL`.
@@ -528,28 +850,187 @@ document.querySelectorAll('.btn-war-room').forEach(function (nut) {{
   nut.addEventListener('click', function () {{
     var key = nut.getAttribute('data-war-key');
     if (!key) return;
-    // `window.open` là ĐƯỜNG CHÍNH, không phải đường lùi.
-    //
-    // Gán `parent.location.href` là điều hướng cấp cao nhất, mà sandbox của
-    // iframe Streamlit KHÔNG có `allow-top-navigation`. Lấy từ chính bundle đang
-    // cài (streamlit/static/.../js): allow-forms · allow-modals · allow-popups ·
-    // allow-popups-to-escape-sandbox · allow-same-origin · allow-scripts ·
-    // allow-downloads. Không có top-navigation.
-    //
-    // Và Chrome chặn nó ÂM THẦM — chỉ log console, KHÔNG ném exception. Nên
-    // `catch` không chạy, đường lùi không bao giờ tới, và nút không làm gì cả.
-    // Cùng loại lỗi đã vá ngày 17/08 ở war room, khi đó phải dùng
-    // `history.replaceState()` + `location.reload()`.
-    //
-    // `allow-popups` CÓ trong danh sách, nên `window.open` chạy được.
     var duong = '/war_room?key=' + encodeURIComponent(key);
     var w = window.open(duong, '_blank');
     if (!w) {{
-      // Trình duyệt chặn popup: thử điều hướng iframe, ít nhất có phản hồi.
       try {{ window.top.location.href = duong; }} catch (err) {{ window.location.href = duong; }}
     }}
   }});
 }});
+
+// ═══ Biểu đồ Prometheus realtime ═══
+//
+// Dữ liệu nhúng sẵn dưới dạng JSON — trang trong iframe `srcdoc` không gọi
+// thẳng Prometheus được (khác origin, không có CORS), nên Python hỏi hộ.
+(function () {{
+  var chartData = {bieu_do_json};
+  var canvases = document.querySelectorAll('.svc canvas[data-service]');
+  if (!chartData || !canvases.length) return;
+
+  // Chart.js tải từ CDN. Mất mạng thì `Chart` không tồn tại và `new Chart(...)`
+  // ném TypeError — im lặng trong console, còn trên trang là bốn ô trắng không
+  // ai hiểu vì sao. Nói ra một câu thay vì để trống.
+  if (typeof Chart === 'undefined') {{
+    Array.prototype.forEach.call(canvases, function (canvas) {{
+      var hop = document.createElement('div');
+      hop.className = 'khong-co';
+      hop.textContent = 'Không tải được thư viện biểu đồ (chart.js qua CDN) — máy này '
+        + 'đang không ra được internet. Số liệu ở các thẻ phía trên vẫn đúng.';
+      // Thay cả `.khung-chart` chứ không chỉ canvas: khung có `height` cố định,
+      // để lại là một khoảng trống 220px dưới câu thông báo.
+      var khung = canvas.closest('.khung-chart') || canvas;
+      khung.parentNode.replaceChild(hop, khung);
+    }});
+    return;
+  }}
+
+  // Trục nào nằm bên nào. `y` (giây) bên trái, hai trục còn lại bên phải.
+  var BEN = {{ y: 'left', y1: 'right', y2: 'right' }};
+
+  function mauTheme() {{
+    var toi = document.documentElement.getAttribute('data-theme') === 'dark';
+    return {{
+      toi: toi,
+      luoi: toi ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+      chu: toi ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
+    }};
+  }}
+
+  function veLai() {{
+    var mau = mauTheme();
+
+    Array.prototype.forEach.call(canvases, function (canvas) {{
+      // Tên dịch vụ đọc từ chính thẻ canvas, không từ một mảng cứng trong JS —
+      // hai danh sách song song là chỗ chắc chắn sẽ lệch nhau.
+      var metrics = chartData[canvas.getAttribute('data-service')];
+      if (!metrics || !metrics.length) return;
+
+      var cu = Chart.getChart(canvas);
+      if (cu) cu.destroy();
+
+      var datasets = metrics.map(function (m) {{
+        var data = m.values.map(function (v) {{
+          var val = parseFloat(v[1]);
+          // Prometheus trả "NaN" khi mẫu số bằng 0 (dịch vụ chưa có lưu lượng).
+          // `null` + `spanGaps` để đường đứt quãng chứ không rơi xuống 0 — vẽ 0
+          // ở đây là bịa ra một khoảng "hoàn toàn không lỗi" chưa từng đo được.
+          if (m.unit === '%' && !isNaN(val)) val = val * 100;
+          return {{ x: v[0] * 1000, y: isNaN(val) ? null : val }};
+        }});
+        return {{
+          label: m.name + ' (' + m.unit + ')',
+          data: data,
+          borderColor: m.color,
+          backgroundColor: m.color,
+          yAxisID: m.truc,
+          borderWidth: 1.5,
+          pointRadius: 0,
+          pointHitRadius: 6,
+          // Ba đường chồng nhau mà cùng tô nền thì che nhau hết. Chỉ vẽ nét.
+          fill: false,
+          tension: 0.3,
+          spanGaps: true
+        }};
+      }});
+
+      var scales = {{
+        x: {{
+          type: 'linear',
+          grid: {{ color: mau.luoi }},
+          ticks: {{
+            color: mau.chu,
+            font: {{ family: 'JetBrains Mono, monospace', size: 10 }},
+            maxTicksLimit: 6,
+            callback: function (val) {{
+              var d = new Date(val);
+              return d.toLocaleTimeString('vi-VN', {{ hour: '2-digit', minute: '2-digit' }});
+            }}
+          }}
+        }}
+      }};
+      // Mỗi chỉ số một trục riêng, tô đúng màu đường của nó để không phải đoán
+      // trục nào của đường nào. Chỉ trục trái kẻ lưới ngang — ba lớp lưới chồng
+      // lên nhau thì không đọc được gì.
+      metrics.forEach(function (m) {{
+        scales[m.truc] = {{
+          type: 'linear',
+          position: BEN[m.truc] || 'left',
+          beginAtZero: true,
+          grid: {{ color: mau.luoi, drawOnChartArea: m.truc === 'y' }},
+          title: {{
+            display: true,
+            text: m.unit,
+            color: m.color,
+            font: {{ family: 'JetBrains Mono, monospace', size: 9 }}
+          }},
+          ticks: {{
+            color: m.color,
+            maxTicksLimit: 5,
+            font: {{ family: 'JetBrains Mono, monospace', size: 9 }}
+          }}
+        }};
+      }});
+
+      new Chart(canvas.getContext('2d'), {{
+        type: 'line',
+        data: {{ datasets: datasets }},
+        options: {{
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: {{ mode: 'index', intersect: false }},
+          plugins: {{
+            legend: {{
+              position: 'top',
+              labels: {{
+                usePointStyle: true,
+                pointStyle: 'circle',
+                padding: 16,
+                color: mau.chu,
+                font: {{ family: 'Inter, sans-serif', size: 11 }}
+              }}
+            }},
+            tooltip: {{
+              backgroundColor: mau.toi ? '#1a1d23' : '#fff',
+              titleColor: mau.toi ? '#eee' : '#333',
+              bodyColor: mau.toi ? '#ccc' : '#555',
+              borderColor: mau.toi ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+              borderWidth: 1,
+              padding: 10,
+              titleFont: {{ family: 'Inter, sans-serif', size: 11 }},
+              bodyFont: {{ family: 'JetBrains Mono, monospace', size: 11 }},
+              callbacks: {{
+                title: function (items) {{
+                  if (!items.length) return '';
+                  var d = new Date(items[0].parsed.x);
+                  return d.toLocaleTimeString('vi-VN', {{ hour: '2-digit', minute: '2-digit', second: '2-digit' }});
+                }},
+                label: function (ctx) {{
+                  var v = ctx.parsed.y;
+                  if (v == null) return ctx.dataset.label + ': chưa có số đo';
+                  return ctx.dataset.label + ': ' + v.toFixed(3);
+                }}
+              }}
+            }}
+          }},
+          scales: scales
+        }}
+      }});
+    }});
+  }}
+
+  veLai();
+
+  // Nút đổi theme chỉ LẬT `data-theme` chứ không tải lại trang (xem
+  // `theme.JS_THEME`). Mọi thứ khác đổi màu theo biến CSS, riêng canvas thì
+  // không: màu trục, chú giải, lưới đã nướng cứng vào lúc dựng biểu đồ. Không
+  // vẽ lại thì chuyển sang nền sáng xong, chữ trên biểu đồ vẫn là màu của nền
+  // tối — mờ tới mức gần như không đọc được.
+  new MutationObserver(veLai).observe(document.documentElement, {{
+    attributes: true,
+    attributeFilter: ['data-theme']
+  }});
+}})();
 </script>
 </body>
 </html>
@@ -561,4 +1042,7 @@ if hasattr(st, "iframe"):
 else:
     import streamlit.components.v1 as components  # noqa: PLC0415
 
-    components.html(TRANG, height=900, scrolling=False)
+    # `scrolling=True` vì từ 22/08 trang dài hơn một khung nhìn (thêm khối biểu
+    # đồ). Chiều cao giữ 900 chứ không đẩy lên 2400: CSS_KHUNG ép iframe về
+    # 100vh nên số này chỉ có nghĩa ở bản Streamlit cũ chưa có `st.iframe`.
+    components.html(TRANG, height=900, scrolling=True)

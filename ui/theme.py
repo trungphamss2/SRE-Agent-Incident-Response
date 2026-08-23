@@ -373,7 +373,8 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
   height: 100%; overflow: hidden; background: #0A0D12;
 }
 [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"],
-[data-testid="stStatusWidget"], [data-testid="stSidebarCollapsedControl"], footer {
+[data-testid="stStatusWidget"], [data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebar"], footer {
   display: none !important;
 }
 .block-container, [data-testid="stMainBlockContainer"], [data-testid="stAppViewBlockContainer"] {
