@@ -235,6 +235,19 @@ class Incident(BaseModel):
     resolved_at: datetime | None = None
     signal: IncidentSignal | None = None
     hypotheses: list[Hypothesis] = Field(default_factory=list)
+    #: Log gốc Agent đã đọc lúc chẩn đoán, lưu lại để war room còn xem được SAU
+    #: KHI log container đã trôi mất.
+    #:
+    #: Vì sao không dùng `Hypothesis.log_evidence` cho việc này: cái đó chỉ lên
+    #: tới Jira khi log **đổi được kết luận** (xem `_post_lai_neu_log_doi_ket_luan`),
+    #: nên phần lớn sự cố không lưu được dòng nào.
+    #:
+    #: Vì sao không đọc thẳng `docker logs` mỗi lần mở phiếu: log container là
+    #: thứ phù du. Đo ngày 23/08 trên KAN-82 — chỉ 20 phút sau khi sự cố đóng,
+    #: một đợt tải mới đã đẩy toàn bộ cửa sổ của nó ra khỏi tầm `docker logs`,
+    #: và `--tail` lớn hơn cũng không cứu được vì Docker nhảy sang file đã xoay
+    #: vòng. Muốn giữ bằng chứng thì phải chép nó đi lúc còn đọc được.
+    log_evidence: list[LogEvidence] = Field(default_factory=list)
     proposal: RemediationProposal | None = None
     timeline: list[TimelineEvent] = Field(default_factory=list)
     postmortem: Postmortem | None = None

@@ -95,6 +95,21 @@ API = os.getenv("API_URL", "https://p-035-incident-agent.onrender.com")
 # đường bình thường của trang này là "Prometheus không với tới được" — mọi ô lấy
 # số từ đó phải có đường lùi tử tế, không được vỡ.
 PROM_URL = os.getenv("PROM_URL", "http://localhost:9090")
+
+#: Địa chỉ Prometheus dành cho TRÌNH DUYỆT người xem, khác `PROM_URL` ở trên.
+#:
+#: `PROM_URL` là địa chỉ tiến trình Streamlit tự gọi — luôn `localhost:9090`, và
+#: nên giữ nguyên như vậy: hỏi số đo qua localhost là đi thẳng, không vòng ra
+#: internet rồi quay lại.
+#:
+#: Nhưng nút "Mở trên Prometheus" thì do **trình duyệt** mở. Dùng chung
+#: `PROM_URL` thì link trỏ `localhost:9090` — đúng với người ngồi tại máy chạy
+#: Streamlit, và **chết với mọi người xem từ xa**, tức gần như toàn bộ người
+#: dùng khi trang đã lên tên miền công khai. Mời người ta kiểm chứng bằng một
+#: link không mở được còn tệ hơn không mời.
+#:
+#: Trống thì lùi về `PROM_URL`, giữ nguyên hành vi cũ cho máy chạy local.
+PROM_PUBLIC_URL = os.getenv("PROM_PUBLIC_URL", "") or PROM_URL
 # Chỉ để dựng link "mở phiếu Jira". Không bắt buộc — thiếu thì nút duyệt nói rõ
 # phải thao tác ở đâu, chứ KHÔNG giả vờ đã thi hành.
 JIRA_URL = os.getenv("JIRA_BASE_URL", "").rstrip("/")
@@ -1123,7 +1138,8 @@ def link_prometheus(promql: str, luc: str | None) -> str | None:
     )
     # `/graph` bị chuyển hướng 302 sang `/query` ở bản 3.x, và chuyển hướng có
     # giữ nguyên query string — nhưng trỏ thẳng `/query` thì bớt được một chặng.
-    return f"{PROM_URL}/query?{tham_so}"
+    # Link cho TRÌNH DUYỆT, không phải cho tiến trình này — xem `PROM_PUBLIC_URL`.
+    return f"{PROM_PUBLIC_URL}/query?{tham_so}"
 
 
 def _unix(iso: str | None) -> float | None:
@@ -2076,6 +2092,12 @@ _LY_DO_LOG: dict[str, str] = {
         "ERROR/WARNING trong cửa sổ này. Đây là một bằng chứng, không phải thiếu "
         "bằng chứng: nó nói sự cố không đến từ lỗi ứng dụng ghi ra được."
     ),
+    "ngoai-tam-log": (
+        "Cửa sổ thời gian của sự cố này đã trôi khỏi phần log container còn giữ — "
+        "log cũ bị đẩy ra khi container ghi tiếp. Cũng KHÔNG phải \"service không có "
+        "lỗi\": không còn gì để đọc mà thôi. Phiếu đã đóng từ lâu thì gần như luôn "
+        "rơi vào đây; hãy dùng bằng chứng metric và bản log Agent đã lưu."
+    ),
     "khong-ro-service": (
         "Phiếu không nói rõ dịch vụ nào bị ảnh hưởng nên không biết đọc log của ai."
     ),
@@ -2123,7 +2145,11 @@ def _gop_dong_lap(dong: list[dict]) -> list[tuple[dict, int]]:
     return gop
 
 
-def khoi_log(hypotheses: list[dict], goi_log: dict | None = None) -> str:
+def khoi_log(
+    hypotheses: list[dict],
+    goi_log: dict | None = None,
+    log_da_luu: list[dict] | None = None,
+) -> str:
     """Log gốc — giữ **nguyên văn** ERROR/WARNING.
 
     Câu tiếng Việt đi ở chú thích phía trên khối, không thay chữ trong log: đó là
@@ -2140,7 +2166,9 @@ def khoi_log(hypotheses: list[dict], goi_log: dict | None = None) -> str:
     goi_log = goi_log or {}
     tuoi = [lg for lg in (goi_log.get("logs") or []) if isinstance(lg, dict)]
 
-    da_luu: list[dict] = []
+    # Thứ tự nguồn: log Agent đã LƯU lên Jira đứng trước log gắn kèm giả thuyết —
+    # cái trước có ở mọi sự cố, cái sau chỉ có khi log đổi được kết luận.
+    da_luu: list[dict] = [lg for lg in (log_da_luu or []) if isinstance(lg, dict)]
     for h in hypotheses:
         da_luu.extend(lg for lg in (h.get("log_evidence") or []) if isinstance(lg, dict))
 
@@ -2199,7 +2227,8 @@ def khoi_log(hypotheses: list[dict], goi_log: dict | None = None) -> str:
     else:
         duoi = (
             '<div class="hint">Đây là bản Agent đã lưu lúc chẩn đoán, KHÔNG phải log '
-            "hiện tại — không đọc được container lúc mở trang.</div>"
+            "hiện tại — log container của cửa sổ đó đã trôi mất, hoặc trang đang "
+            "chạy ở chỗ không với tới container.</div>"
         )
         tieu_de = f"Log Agent đã lưu — dòng đỏ là mức {e(ten_muc)}"
 
@@ -2595,7 +2624,9 @@ def view_su_co(inc: dict, kho: dict, dang_chon: bool = False) -> str:
             '<div class="note">Sự cố này không kèm tín hiệu gốc — nó được tạo trước khi '
             "Agent biết lưu lại tín hiệu đo được.</div>"
         )
-    than += khoi_log(hypotheses, (kho.get("log") or {}).get(khoa))
+    than += khoi_log(
+        hypotheses, (kho.get("log") or {}).get(khoa), inc.get("log_evidence")
+    )
     phan.append(
         muc(
             so,

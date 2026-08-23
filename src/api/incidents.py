@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -310,11 +311,47 @@ async def get_incident_logs(jira_key: str) -> IncidentLogs:
     )
 
 
+#: Bao lâu thì `/api/status` mới hỏi lại Jira.
+#:
+#: ## Vì sao cần đệm, và vì sao chỉ 3 giây
+#:
+#: Từ 24/08 status page tự cập nhật **mỗi giây** từ trình duyệt. Không có đệm
+#: thì mỗi giây là một câu JQL lên Jira, nhân với số người đang mở trang — Jira
+#: trả 429 rate limit rất nhanh, và lúc đó trang trắng chứ không phải chậm.
+#:
+#: 3 giây vì đó là mức làm Jira an toàn mà mắt không nhận ra độ trễ. Không đặt
+#: cao hơn: trạng thái dịch vụ là thứ người ta mở trang này để xem, chậm vài
+#: giây thì được, chậm nửa phút thì trang mất ý nghĩa.
+#:
+#: Đệm ở ĐÂY chứ không phải ở trình duyệt là có chủ ý: một chỗ đệm phục vụ mọi
+#: người xem, nên mười người mở trang vẫn chỉ tốn ngần ấy lời gọi Jira.
+_TTL_STATUS_GIAY = 3.0
+
+#: `(mốc lấy được, dữ liệu)` của lần dựng status page gần nhất.
+_dem_status: tuple[float, StatusPage] | None = None
+
+
+def _status_page_co_dem() -> StatusPage:
+    """`_load_status_page()` nhưng dùng lại kết quả cũ trong `_TTL_STATUS_GIAY` giây.
+
+    Không khoá: hai request vào cùng lúc lúc đệm vừa hết thì cùng lắm gọi Jira
+    hai lần. Thêm khoá vào một đường chạy chỉ đọc là đổi lấy rủi ro deadlock cho
+    một khoản tiết kiệm không đáng.
+    """
+    global _dem_status
+    bay_gio = time.monotonic()
+    if _dem_status is not None and bay_gio - _dem_status[0] < _TTL_STATUS_GIAY:
+        return _dem_status[1]
+    trang = _load_status_page()
+    _dem_status = (bay_gio, trang)
+    return trang
+
+
 @router.get("/status", response_model=StatusPage)
 async def status_page() -> StatusPage:
     """Dữ liệu status page công khai — không cần đăng nhập."""
     try:
-        return _load_status_page()
+        return _status_page_co_dem()
     except JiraApiError as exc:
         logger.error("Jira lỗi khi dựng status page: %s", exc)
         raise _jira_error_response(exc) from exc

@@ -58,6 +58,18 @@ API = os.getenv("API_URL", "https://p-035-incident-agent.onrender.com")
 # chạy — Prometheus chỉ có bản local trong buổi demo.
 PROM_URL = os.getenv("PROM_URL", "http://localhost:9090")
 
+#: Địa chỉ API và Prometheus dành cho TRÌNH DUYỆT người xem, khác hai biến trên.
+#:
+#: `API` / `PROM_URL` là địa chỉ tiến trình Streamlit tự gọi — `localhost`, đi
+#: thẳng, không vòng ra internet. Nhưng từ 23/08 trang tự cập nhật theo kiểu SPA:
+#: chính trình duyệt người xem đi hỏi số mới, và `localhost` với họ là máy của
+#: HỌ. Nên phải có địa chỉ công khai riêng.
+#:
+#: Trống thì lùi về địa chỉ nội bộ — đúng cho máy chạy local, và khi đó phần tự
+#: cập nhật tự tắt thay vì hỏng ngầm (xem `_TU_CAP_NHAT_DUOC`).
+API_PUBLIC = os.getenv("API_PUBLIC_URL", "") or API
+PROM_PUBLIC = os.getenv("PROM_PUBLIC_URL", "") or PROM_URL
+
 VN_TZ = timezone(timedelta(hours=7))  # Việt Nam không có DST, luôn UTC+7
 
 #: Danh sách dịch vụ trang này theo dõi — NGUỒN DUY NHẤT cho cả lưới thẻ lẫn
@@ -82,6 +94,43 @@ SERVICES_THEO_DOI: tuple[str, ...] = (
 
 #: Giá trị `health` UI tự đặt, KHÔNG thuộc contract ④ — xem `labels.HEALTH`.
 HEALTH_CHUA_CO = "chua-co-du-lieu"
+
+#: Nhịp trang tự lấy số mới, tính bằng giây. Đổi bằng `POLL_SECONDS` trong môi
+#: trường, không phải sửa file.
+#:
+#: ## Vì sao 2 chứ không phải 1
+#:
+#: Nhịp poll của trang là mắt xích NHỎ NHẤT trong chuỗi. Đường đi thật của một
+#: sự cố từ lúc xảy ra tới lúc hiện lên màn hình:
+#:
+#:   dịch vụ chậm đi
+#:     → Prometheus scrape ................. tối đa  5s  (demo/prometheus.yml)
+#:     → phải vượt ngưỡng liên tục ......... ít nhất 30s (contract ①)
+#:     → Agent quét thấy .................... tối đa 10s  (run_agent DEFAULT_INTERVAL)
+#:     → đệm /api/status .................... tối đa  3s  (_TTL_STATUS_GIAY)
+#:     → trang poll ......................... tối đa  Ns  ← chỗ này
+#:
+#: Tổng đã là ~48 giây trước khi tới `N`. Đặt `N = 1` thay vì `5` rút tổng từ
+#: ~53s xuống ~49s — tức 8%, mà đổi lại là gấp 5 lần số request.
+#:
+#: 2 giây là điểm cân: vẫn dưới nhịp scrape 5 giây nên không bao giờ phải chờ
+#: thêm trọn một vòng scrape, mà lưu lượng chỉ bằng một nửa so với 1 giây. Dưới
+#: 3 giây thì mắt người đọc là "tức thời", nên nhanh hơn nữa không ai nhận ra.
+#:
+#: Muốn trang nhạy hơn thật thì phải rút `--interval` của Agent (10s), không
+#: phải rút nhịp này — đó mới là mắt xích lớn.
+#:
+#: Chặn dưới 1 giây: 0 là vòng lặp quay không nghỉ.
+TU_CAP_NHAT_GIAY = max(1, int(os.getenv("POLL_SECONDS", "2")))
+
+#: Nhịp riêng cho biểu đồ, thưa hơn hẳn.
+#:
+#: Prometheus `scrape_interval: 5s` (demo/prometheus.yml), nên hỏi lại nhanh hơn
+#: 5 giây là **không thể** có điểm dữ liệu mới — chỉ tốn băng thông và CPU vẽ
+#: lại. Mỗi lượt là 3 câu `query_range` trả về 30 phút dữ liệu cho 4 dịch vụ;
+#: bắn mỗi giây qua tunnel là hàng trăm KB/giây cho mỗi người xem, đổi lấy đúng
+#: không có gì.
+CHART_MOI_GIAY = 5
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -528,7 +577,7 @@ def khoi_up(ten_service: str, bang_up: dict[str, float] | None) -> str:
     gia_tri = bang_up[ten_service]
     song = gia_tri >= 1
     return (
-        '<div class="o-so">'
+        '<div class="o-so" data-o="up">'
         '<div class="nhan">Prometheus scrape được không</div>'
         f'<div class="cau">{"Đang phản hồi" if song else "Không phản hồi"}</div>'
         f'<div class="tech"><span class="arrow">↳</span>up = {e(format(gia_tri, "g"))} '
@@ -591,8 +640,26 @@ def the_service(
             f'{theme.ICON["set"]}Xem chi tiết sự cố'
             f'{theme.ICON["mui_ten"]}</button>'
         )
+    # `data-svc` + `data-hinh` là hợp đồng với phần JS tự cập nhật.
+    #
+    # `data-hinh` ghi lại HÌNH DẠNG thẻ lúc server dựng: có khối sự cố không, có
+    # ô chỉ số không, có ô `up` không, có biểu đồ không. JS so hình dạng mới với
+    # chuỗi này; **khác nhau thì tải lại cả trang** thay vì cố vá DOM.
+    #
+    # Vì sao cần cửa đó: cập nhật tại chỗ chỉ an toàn khi thay GIÁ TRỊ. Khi một
+    # dịch vụ vừa có sự cố (thẻ mọc thêm ô chỉ số + nút war room) thì phải dựng
+    # markup mới — mà dựng markup ở hai nơi, Python một bản JS một bản, là cách
+    # chắc chắn để hai bên lệch nhau rồi trang hiện sai. Tải lại là chậm hơn vài
+    # trăm mili giây, nhưng luôn đúng.
+    hinh = ",".join([
+        f"inc:{int(bool(svc.get('active_incident')))}",
+        f"sig:{int(bool(khoi_chi_so(incident)))}",
+        f"tin:{int(bool(tin_html))}",
+        f"up:{int(bool(khoi_up(svc['name'], bang_up)))}",
+        f"chart:{0 if chuoi is None else (1 if chuoi else 2)}",
+    ])
     return (
-        f'<div class="svc{lop}">'
+        f'<div class="svc{lop}" data-svc="{e(str(svc["name"]))}" data-hinh="{e(hinh)}">'
         f'<div class="dau"><span class="ten">{e(labels.service(svc["name"]))}</span>'
         f'{pill(cau, _BIEN_PILL.get(suc_khoe, "info"))}</div>'
         f'<div class="tech"><span class="arrow">↳</span>{e(svc["name"])}</div>'
@@ -665,8 +732,7 @@ def khoi_mo_dau(services: list[dict]) -> str:
         '<div class="mo-dau">'
         '<span class="sec-eyebrow">Trạng thái dịch vụ</span>'
         f'<div class="hang"><h1>{tieu_de}</h1></div>'
-        f'<div class="hang">{pill(nhan, bien)}'
-        '<span class="tech" style="margin:0">Trang công khai · không cần đăng nhập</span></div>'
+        f'<div class="hang">{pill(nhan, bien)}</div>'
         '<p class="dan">Cập nhật tự động từ số liệu đo được của hệ thống. '
         "Mỗi dịch vụ kèm chỉ số đang bất thường và tên metric gốc, để người trực "
         "kiểm chứng lại được.</p>"
@@ -734,6 +800,7 @@ except requests.RequestException as error:
 # không đọc được chính câu "không gọi được API" mà nhánh đó vừa soạn ra. Mà
 # nhánh lỗi lại là nhánh hay gặp nhất: Render free tier ngủ sau 15 phút.
 bieu_do_json = "null"
+cau_hinh_js = "null"
 
 if loi:
     than = (
@@ -788,12 +855,35 @@ else:
     # không phải `null`/`true`, và JS nuốt không nổi.
     bieu_do_json = _json.dumps(prom_data, ensure_ascii=False) if prom_data else "null"
 
+    # Mọi thứ phần JS tự cập nhật cần biết. Gom vào MỘT gói thay vì rải hằng số
+    # trong JS: hằng số rải rác là cách để nó lệch khỏi Python lúc nào không hay.
+    cau_hinh_js = _json.dumps(
+        {
+            "api": API_PUBLIC,
+            "prom": PROM_PUBLIC,
+            "chartPhut": CHART_PHUT,
+            "chartStep": CHART_STEP_GIAY,
+            "chartMoiGiay": CHART_MOI_GIAY,
+            "healthChuaCo": HEALTH_CHUA_CO,
+            # Câu tiếng Việt của từng `health`, lấy thẳng từ labels để JS không
+            # giữ bản dịch riêng.
+            "health": {ma: cau for ma, (_icon, cau) in labels.HEALTH.items()},
+            "pill": _BIEN_PILL,
+            "lopThe": {"down": " co-su-co", "degraded": " suy-giam", HEALTH_CHUA_CO: " chua-ro"},
+            "metrics": [
+                {"name": ten, "promql": q, "unit": dv, "color": mau, "truc": tr}
+                for ten, q, dv, mau, tr in PROM_METRICS
+            ],
+        },
+        ensure_ascii=False,
+    )
+
     than = (
         '<div class="wrap">'
         + khoi_mo_dau(services)
         + luoi
         + '<div class="chan">'
-        + f'<span>Cập nhật lúc {e(fmt_time_vn(str(data.get("updated_at", ""))))}</span>'
+        + f'<span id="chan-luc">Cập nhật lúc {e(fmt_time_vn(str(data.get("updated_at", ""))))}</span>'
         + f'<span class="day">{e(API)}</span>'
         + "</div>"
         + '<details class="more"><summary>Dữ liệu thô (dành cho người trực)</summary>'
@@ -829,6 +919,293 @@ TRANG = f"""<!DOCTYPE html>
 <script>
 {theme.JS_THEME}
 document.getElementById('btn-reload').addEventListener('click', function () {{ taiLai(); }});
+
+// ═══════════════ Tự cập nhật tại chỗ, không tải lại trang ═══════════════
+//
+// Trước 24/08 bộ đếm gọi thẳng `taiLai()` — tải lại CẢ trang mỗi 30 giây. Đúng
+// số liệu nhưng nháy màn hình và mất vị trí cuộn, tức trang càng tự làm mới thì
+// càng khó đọc.
+//
+// Làm được kiểu SPA là nhờ một thay đổi ở hạ tầng: từ khi có `api-035` và
+// `prom-035` trên tunnel, **trình duyệt người xem tự gọi API và Prometheus
+// được**. Trước đó chỉ tiến trình Streamlit gọi được (qua localhost), nên không
+// có đường nào lấy số mới ngoài việc dựng lại cả trang.
+var CAU_HINH = {cau_hinh_js};
+
+function _e(t) {{
+  var d = document.createElement('div');
+  d.textContent = (t === null || t === undefined) ? '' : String(t);
+  return d.innerHTML;
+}}
+
+var _MAY_NOI_BO = ['localhost', '127.0.0.1', '::1', '[::1]'];
+
+// ⚠️ Ghi vào DOM chỉ khi giá trị THẬT SỰ đổi.
+//
+// Ở nhịp 1 giây, gán đè vô điều kiện gây một lỗi rất khó quy trách nhiệm: mỗi
+// lần gán `innerHTML`/`textContent` là trình duyệt **dựng lại node đó**, và
+// vùng người dùng đang bôi đen bên trong bị xoá. Người xem thử chọn `up = 1`
+// để chép ra thì cứ mỗi giây lại mất vùng chọn — họ sẽ nghĩ chuột hỏng, không
+// nghĩ tại trang.
+//
+// Kèm theo là layout/paint lặp vô ích mỗi giây trên thứ không đổi.
+function _datChu(el, chu) {{
+  if (el && el.textContent !== chu) el.textContent = chu;
+}}
+function _datHtml(el, html) {{
+  if (el && el.innerHTML !== html) el.innerHTML = html;
+}}
+function _datLop(el, lop) {{
+  if (el && el.className !== lop) el.className = lop;
+}}
+
+function _laNoiBo(u) {{
+  var h;
+  try {{ h = new URL(u, location.href).hostname; }} catch (err) {{ return false; }}
+  return _MAY_NOI_BO.indexOf(h) !== -1;
+}}
+
+// Trang đã lên tên miền công khai mà API/Prometheus vẫn là `localhost` thì
+// `localhost` với người xem là MÁY CỦA HỌ — fetch sẽ hỏng. Phát hiện sớm rồi
+// lùi về tải lại trang, thay vì để nó hỏng ngầm mỗi 30 giây.
+function _tuCapNhatDuoc() {{
+  if (!CAU_HINH) return false;
+  if (_MAY_NOI_BO.indexOf(location.hostname) !== -1) return true;
+  return !_laNoiBo(CAU_HINH.api) && !_laNoiBo(CAU_HINH.prom);
+}}
+
+function _incidentCua(svc, ds) {{
+  var i;
+  if (svc.active_incident) {{
+    for (i = 0; i < ds.length; i++) {{
+      if (ds[i].jira_key === svc.active_incident) return ds[i];
+    }}
+  }}
+  for (i = 0; i < ds.length; i++) {{
+    var a = ds[i].affected_services || [];
+    if (a.indexOf(svc.name) !== -1) return ds[i];
+  }}
+  return null;
+}}
+
+function _layJson(url) {{
+  return fetch(url, {{ cache: 'no-store' }}).then(function (r) {{
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }});
+}}
+
+function _layUp() {{
+  return _layJson(CAU_HINH.prom + '/api/v1/query?query=' + encodeURIComponent('up'))
+    .then(function (g) {{
+      var ra = {{}};
+      (((g || {{}}).data || {{}}).result || []).forEach(function (chuoi) {{
+        var nhan = chuoi.metric || {{}};
+        var ten = nhan.service || nhan.job;
+        if (ten) ra[ten] = parseFloat(chuoi.value[1]);
+      }});
+      return ra;
+    }});
+}}
+
+function _layChuoi() {{
+  var ketThuc = Math.floor(Date.now() / 1000);
+  var batDau = ketThuc - CAU_HINH.chartPhut * 60;
+
+  // Gieo sẵn khoá cho mọi dịch vụ đang hiện: "có khoá nhưng mảng rỗng" nghĩa là
+  // Prometheus chạy mà chưa có series — khác hẳn "không hỏi được Prometheus".
+  // Đúng quy ước `load_prom_range()` bên Python.
+  var theoSvc = {{}};
+  Array.prototype.forEach.call(document.querySelectorAll('.svc[data-svc]'), function (el) {{
+    theoSvc[el.getAttribute('data-svc')] = [];
+  }});
+
+  var viec = CAU_HINH.metrics.map(function (m) {{
+    var u = CAU_HINH.prom + '/api/v1/query_range?query=' + encodeURIComponent(m.promql)
+      + '&start=' + batDau + '&end=' + ketThuc + '&step=' + CAU_HINH.chartStep;
+    return _layJson(u).then(function (g) {{
+      (((g || {{}}).data || {{}}).result || []).forEach(function (chuoi) {{
+        var nhan = chuoi.metric || {{}};
+        var ten = nhan.service || nhan.job;
+        if (!ten || !(ten in theoSvc)) return;
+        theoSvc[ten].push({{
+          name: m.name, unit: m.unit, color: m.color, truc: m.truc,
+          values: chuoi.values || []
+        }});
+      }});
+      return true;
+    }}).catch(function () {{ return false; }});
+  }});
+
+  return Promise.all(viec).then(function (ketQua) {{
+    // Không câu nào hỏi được = không với tới Prometheus.
+    return ketQua.some(Boolean) ? theoSvc : null;
+  }});
+}}
+
+function _hinhMoi(svc, inc, bangUp, chuoi) {{
+  var cauHealth = CAU_HINH.health[svc.health] || '';
+  var tin = String(svc.message || '').trim();
+  var coTin = (svc.health === CAU_HINH.healthChuaCo) || (tin && tin !== cauHealth);
+  var mangChuoi = chuoi ? chuoi[svc.name] : undefined;
+  return [
+    'inc:' + (svc.active_incident ? 1 : 0),
+    'sig:' + ((inc && inc.signal) ? 1 : 0),
+    'tin:' + (coTin ? 1 : 0),
+    'up:' + ((bangUp && bangUp[svc.name] !== undefined) ? 1 : 0),
+    'chart:' + (!chuoi ? 0 : (mangChuoi && mangChuoi.length ? 1 : 2))
+  ].join(',');
+}}
+
+function _veThe(el, svc, bangUp) {{
+  _datLop(el, ('svc' + (CAU_HINH.lopThe[svc.health] || '')).trim());
+
+  var pill = el.querySelector('.dau .pill');
+  if (pill) {{
+    _datLop(pill, 'pill ' + (CAU_HINH.pill[svc.health] || 'info'));
+    _datHtml(pill, '<span class="cham"></span>' + _e(CAU_HINH.health[svc.health] || svc.health));
+  }}
+
+  var tinEl = el.querySelector('.tin');
+  if (tinEl && svc.health !== CAU_HINH.healthChuaCo) {{
+    _datChu(tinEl, String(svc.message || '').trim());
+  }}
+
+  if (svc.active_incident) {{
+    _datChu(el.querySelector('.ma-phieu .inline-code'), svc.active_incident);
+    var nut = el.querySelector('.btn-war-room');
+    if (nut && nut.getAttribute('data-war-key') !== svc.active_incident) {{
+      nut.setAttribute('data-war-key', svc.active_incident);
+    }}
+  }}
+
+  var oUp = el.querySelector('.o-so[data-o="up"]');
+  if (oUp && bangUp && bangUp[svc.name] !== undefined) {{
+    var v = bangUp[svc.name];
+    _datChu(oUp.querySelector('.cau'), v >= 1 ? 'Đang phản hồi' : 'Không phản hồi');
+    _datHtml(
+      oUp.querySelector('.tech'),
+      '<span class="arrow">↳</span>up = ' + _e(v)
+        + ' — trạng thái tại lúc hỏi, không phải uptime %'
+    );
+  }}
+}}
+
+function _veChanTrang(luc) {{
+  var el = document.getElementById('chan-luc');
+  if (!el || !luc) return;
+  var d = new Date(luc);
+  if (isNaN(d.getTime())) return;
+  var o = {{ timeZone: 'Asia/Ho_Chi_Minh', hour12: false }};
+  var gio = d.toLocaleTimeString('vi-VN', Object.assign({{
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }}, o));
+  var ngay = d.toLocaleDateString('vi-VN', Object.assign({{
+    day: '2-digit', month: '2-digit', year: 'numeric'
+  }}, o));
+  _datChu(el, 'Cập nhật lúc ' + gio + ' ' + ngay);
+}}
+
+// Trả `true` nếu đã cập nhật xong tại chỗ, `false` nếu phải tải lại cả trang.
+var _chuoiCu = null;
+var _chuoiLuc = 0;
+var _chuoiDaVe = null;
+
+// Biểu đồ đi theo nhịp riêng — xem `CHART_MOI_GIAY`. Giữa hai lượt thì dùng lại
+// bộ dữ liệu cũ, vì Prometheus cũng chưa có gì mới để trả.
+function _chuoiTheoNhip() {{
+  var bay_gio = Date.now();
+  if (_chuoiCu !== null && bay_gio - _chuoiLuc < CAU_HINH.chartMoiGiay * 1000) {{
+    return Promise.resolve(_chuoiCu);
+  }}
+  return _layChuoi().then(function (c) {{
+    _chuoiCu = c;
+    _chuoiLuc = bay_gio;
+    return c;
+  }});
+}}
+
+function capNhat() {{
+  if (!_tuCapNhatDuoc()) return Promise.resolve(false);
+
+  return Promise.all([
+    _layJson(CAU_HINH.api + '/api/status'),
+    _layUp().catch(function () {{ return null; }}),
+    _chuoiTheoNhip()
+  ]).then(function (kq) {{
+    var data = kq[0], bangUp = kq[1], chuoi = kq[2];
+    var ds = data.active_incidents || [];
+    var theo = {{}};
+    (data.services || []).forEach(function (s) {{ theo[s.name] = s; }});
+
+    var the = document.querySelectorAll('.svc[data-svc]');
+    for (var i = 0; i < the.length; i++) {{
+      var el = the[i];
+      var svc = theo[el.getAttribute('data-svc')];
+      // Dịch vụ biến mất khỏi API → cấu trúc trang đổi, không vá được.
+      if (!svc) return false;
+
+      // Không cần đụng tới ô "chỉ số đang bất thường": `signal.metric_value` và
+      // `breached_for_seconds` là số ĐÓNG BĂNG lúc phát hiện, không đổi theo
+      // thời gian. Nên nó không bao giờ cũ, và JS không phải dựng lại một ô đi
+      // qua `labels.bang_chung()` — tức không có bản dịch thứ hai để lệch khỏi
+      // Python. Sự cố xuất hiện hay biến mất thì `data-hinh` bắt được ngay dưới.
+
+      var inc = _incidentCua(svc, ds);
+      if (_hinhMoi(svc, inc, bangUp, chuoi) !== el.getAttribute('data-hinh')) return false;
+    }}
+
+    for (var j = 0; j < the.length; j++) {{
+      _veThe(the[j], theo[the[j].getAttribute('data-svc')], bangUp);
+    }}
+    // Chỉ vẽ lại khi vừa lấy được bộ dữ liệu MỚI; giữa hai nhịp biểu đồ thì
+    // `chuoi` là bộ cũ, vẽ lại chỉ tốn CPU.
+    if (chuoi && chuoi !== _chuoiDaVe && window.__datChuoi) {{
+      _chuoiDaVe = chuoi;
+      window.__datChuoi(chuoi);
+    }}
+    _veChanTrang(data.updated_at);
+    return true;
+  }}).catch(function () {{
+    return false;
+  }});
+}}
+
+// ═══ Tự cập nhật mỗi giây ═══
+//
+// Không đếm ngược, không nút bật/tắt, không nháy màn hình: `capNhat()` chỉ thay
+// giá trị trong DOM đang có. Người xem không nhận ra nó vừa chạy, và đó là điều
+// mong muốn — status page phải luôn đúng "bây giờ" mà không đòi ai chú ý.
+//
+// `taiLai()` (tải lại cả trang) chỉ còn là ĐƯỜNG LÙI: khi cấu trúc trang phải
+// đổi — dịch vụ vừa có sự cố, vừa mất ô `up`, vừa có biểu đồ — hoặc khi trình
+// duyệt không với tới được API. Xem `capNhat()`.
+(function () {{
+  var NHIP = {TU_CAP_NHAT_GIAY} * 1000;
+  var dangChay = false;
+
+  function mot_vong() {{
+    // Bỏ lượt nếu lượt trước chưa xong. Mạng chậm hơn nhịp gọi thì hàng đợi
+    // request sẽ phình vô hạn — kiểu hỏng chỉ lộ ra trên máy người khác.
+    if (dangChay) return;
+    dangChay = true;
+    capNhat().then(function (xong) {{
+      dangChay = false;
+      if (!xong) taiLai();
+    }}).catch(function () {{
+      dangChay = false;
+    }});
+  }}
+
+  setInterval(mot_vong, NHIP);
+
+  // Trình duyệt bóp `setInterval` lại khi tab bị ẩn — đo được: 206 giây thực tế
+  // mà bộ đếm chỉ tick khoảng 26 lần. Tab ẩn thì không hỏi cũng đúng, nhưng lúc
+  // người ta QUAY LẠI phải cập nhật ngay, đừng bắt chờ hết nhịp.
+  document.addEventListener('visibilitychange', function () {{
+    if (document.visibilityState === 'visible') mot_vong();
+  }});
+}})();
 
 // ═══ Nút War Room trên header ═══
 document.getElementById('btn-war-room-nav').addEventListener('click', function () {{
@@ -867,6 +1244,10 @@ document.querySelectorAll('.btn-war-room').forEach(function (nut) {{
   var canvases = document.querySelectorAll('.svc canvas[data-service]');
   if (!chartData || !canvases.length) return;
 
+  // Cho phần tự cập nhật thay dữ liệu rồi vẽ lại bằng CHÍNH đường dựng ban đầu —
+  // không có bản dựng biểu đồ thứ hai để lệch khỏi bản này.
+  window.__datChuoi = function (moi) {{ chartData = moi; veLai(); }};
+
   // Chart.js tải từ CDN. Mất mạng thì `Chart` không tồn tại và `new Chart(...)`
   // ném TypeError — im lặng trong console, còn trên trang là bốn ô trắng không
   // ai hiểu vì sao. Nói ra một câu thay vì để trống.
@@ -896,7 +1277,7 @@ document.querySelectorAll('.btn-war-room').forEach(function (nut) {{
     }};
   }}
 
-  function veLai() {{
+  function veLai(buocDungLai) {{
     var mau = mauTheme();
 
     Array.prototype.forEach.call(canvases, function (canvas) {{
@@ -906,7 +1287,6 @@ document.querySelectorAll('.btn-war-room').forEach(function (nut) {{
       if (!metrics || !metrics.length) return;
 
       var cu = Chart.getChart(canvas);
-      if (cu) cu.destroy();
 
       var datasets = metrics.map(function (m) {{
         var data = m.values.map(function (v) {{
@@ -971,6 +1351,23 @@ document.querySelectorAll('.btn-war-room').forEach(function (nut) {{
         }};
       }});
 
+      // ⚠️ Cùng bộ đường thì THAY SỐ LIỆU tại chỗ, đừng dựng lại biểu đồ.
+      //
+      // `destroy()` + `new Chart()` mỗi lượt sẽ vứt luôn trạng thái tương tác:
+      // ai đang rê chuột đọc tooltip thì cứ mỗi nhịp lại mất, và với 4 biểu đồ
+      // thì đó cũng là 4 lần cấp phát canvas vô ích. Đổi màu theo theme mới cần
+      // dựng lại — lúc đó `buocDungLai` bật lên.
+      if (cu && !buocDungLai
+          && cu.data.datasets.length === datasets.length
+          && cu.data.datasets.every(function (ds, k) {{ return ds.label === datasets[k].label; }})) {{
+        for (var k = 0; k < datasets.length; k++) {{
+          cu.data.datasets[k].data = datasets[k].data;
+        }}
+        cu.update('none');
+        return;
+      }}
+      if (cu) cu.destroy();
+
       new Chart(canvas.getContext('2d'), {{
         type: 'line',
         data: {{ datasets: datasets }},
@@ -1026,7 +1423,7 @@ document.querySelectorAll('.btn-war-room').forEach(function (nut) {{
   // không: màu trục, chú giải, lưới đã nướng cứng vào lúc dựng biểu đồ. Không
   // vẽ lại thì chuyển sang nền sáng xong, chữ trên biểu đồ vẫn là màu của nền
   // tối — mờ tới mức gần như không đọc được.
-  new MutationObserver(veLai).observe(document.documentElement, {{
+  new MutationObserver(function () {{ veLai(true); }}).observe(document.documentElement, {{
     attributes: true,
     attributeFilter: ['data-theme']
   }});

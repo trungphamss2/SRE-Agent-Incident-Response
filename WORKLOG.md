@@ -963,7 +963,24 @@ Cuối ngày dọn nốt chỗ lệch tông giữa hai trang: tách `ui/theme.py
 | Việt | Mở rộng `demo/loadtest.py`: thêm kịch bản test mới | ✅ Done | `b666e15`, +106 dòng |
 | Việt | Cập nhật fixture `status.json` + `ui/labels.py` + `ui/theme.py` cho phù hợp giao diện mới | ✅ Done | `b666e15` |
 
-**Tổng kết ngày:** Commit lớn nhất của Việt: +1.212 dòng, 13 file. Status page có biểu đồ Prometheus realtime bằng Chart.js — dữ liệu do Python hỏi hộ (iframe `srcdoc` không gọi thẳng Prometheus được vì khác origin). API mới `/incidents/{key}/logs` đọc log tươi từ container, phân biệt rõ 3 lý do khi rỗng (không Docker / không container / log sạch) để war room hiển thị đúng câu. War room mở rộng thêm chức năng hiển thị.
+| Việt | Bỏ Render, tự host qua Cloudflare Tunnel: 3 route (`035` → UI 8501, `api-035` → API 8000, `prom-035` → Prometheus 9090), backend chạy trên host để `docker logs` thấy container demo | ✅ Done | `docs/self-host-cloudflare.md` (mới), `Makefile` target `api-local`/`ui-local` |
+| Việt | Nối vòng HITL qua tunnel: sửa 2 Jira Automation rule trỏ về `api-035`. Nghiệm thu thật trên KAN-85 — người duyệt `vietpn04` ≠ `JIRA_AGENT_ACCOUNT_ID`, Agent thi hành `increase_pool`, sinh postmortem + 2 sub-task | ✅ Done | webhook 200, guard chống trùng postmortem chạy đúng |
+| Việt | Biểu đồ Prometheus chuyển vào TRONG thẻ dịch vụ (bỏ khối riêng cuối trang) — mỗi chỉ số một trục y riêng vì lệch đơn vị 2 bậc mười, gộp dòng trùng, khung cao cố định chống Chart.js phình canvas | ✅ Done | `ui/status_page.py` |
+| Việt | Status page tự cập nhật kiểu SPA, nhịp 2 giây, không tải lại trang: trình duyệt gọi thẳng `api-035` + `prom-035`. Giữ vị trí cuộn, giữ vùng bôi đen, giữ tooltip biểu đồ | ✅ Done | `POLL_SECONDS`, `API_PUBLIC_URL`, `CORS_ORIGINS` |
+| Việt | Đệm 3 giây cho `/api/status` — 10 lời gọi trong 3 giây chỉ còn 1 lần hỏi Jira, chặn 429 khi nhiều người cùng xem | ✅ Done | `_TTL_STATUS_GIAY`, `src/api/incidents.py` |
+| Việt | Sửa `docker logs` trả sai trên Docker Desktop: bỏ `--since/--until` (im lặng trả rỗng khi lệch giờ), đọc 2 mức `--tail` rồi ghép + khử trùng theo mốc nano giây — một mức trả file đang ghi, mức kia trả file đã xoay vòng | ✅ Done | `src/services/log_collector.py`, +3 test |
+| Việt | Lưu bền log Agent đã đọc: `Incident.log_evidence` + `JiraClient.post_logs()` — trước đó log chỉ lên Jira khi nó ĐỔI kết luận, nên 15/15 phiếu mà bộ luật tự nêu được nguyên nhân đều có 0 dòng | ✅ Done | contract ② (thêm trường có mặc định, tương thích ngược) |
+| Việt | Vá 2 lỗi cấu hình chặn Agent: `DATABASE_URL` trỏ cổng 5432 trong khi Postgres map ra 55432 (mất bằng chứng deploy), và LLM 402 vì không đặt `max_tokens` nên bị giữ chỗ theo trần 8192 token | ✅ Done | `.env`, `llm_max_tokens` mặc định 2048 |
+| Việt | Sửa `PROM_PUBLIC_URL` tách khỏi `PROM_URL`: link "Mở trên Prometheus" do trình duyệt mở nên không dùng được `localhost` | ✅ Done | `ui/pages/war_room.py` |
+
+**Tổng kết ngày:** Hai đợt. Đợt sáng (`b666e15`, +1.212 dòng): biểu đồ Prometheus realtime, API `/incidents/{key}/logs`. Đợt chiều: **bỏ Render, chuyển hẳn sang tự host qua Cloudflare Tunnel** — 3 subdomain, vòng HITL nghiệm thu thật trên KAN-85. Status page thành SPA nhịp 2 giây, không còn tải lại trang.
+
+Ba lỗi đáng ghi lại vì đều thuộc loại **im lặng trả sai**, nguy hiểm hơn crash:
+1. `docker logs --since` và `--tail` lớn trả lát cắt sai trên Docker Desktop → 0 dòng → UI kết luận "log sạch", tức khẳng định SAI với người trực rằng service không ghi lỗi nào.
+2. LLM 402 vì `max_tokens` mặc định 8192 → Agent **vẫn chạy tiếp** bằng kết luận bộ luật, war room vẫn có giả thuyết, nhìn qua tưởng LLM đã chẩn đoán.
+3. `DATABASE_URL` sai cổng → `correlate_deploy` mù, mất `change_note` — nguồn phi cấu trúc duy nhất mà UC-4 cần.
+
+Đo lường: `654 test pass`. 5 cảnh báo ruff còn lại đều có sẵn từ trước trên `HEAD`, không phải phát sinh mới.
 
 ---
 
