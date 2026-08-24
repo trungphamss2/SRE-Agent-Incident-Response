@@ -182,11 +182,11 @@ và lúc trời sáng. Gen tới khi được một bộ khớp.
 03-so-do-agent.mov          18s    sơ đồ 4 khối (hoặc Long tự dựng, xem dưới)
 04-gay-su-co.mov            10s    terminal, đã tua nhanh ×6
 05-so-do-mu.mov             22s    terminal, PromQL ra p95 = 0,048
-06-agent-vao-cuoc.mov       30s    terminal, 2 dòng log cần khoanh
-07-war-room.mov             14s    war room + bấm kiểm chứng PromQL
+06-agent-vao-cuoc.mov       25s    terminal, 2 dòng log cần khoanh
+07-war-room.mov             19s    war room + bấm kiểm chứng PromQL
 08-bi-chan.mov              10s    terminal, duyet.py bị từ chối
 09-nguoi-duyet.mov          14s    Jira: kéo phiếu + mở History
-10-tu-xac-nhan.mov          10s    terminal, verify → đã hồi phục
+10-tu-xac-nhan.mov           8s    terminal, verify → đã hồi phục
 ```
 
 **Cảnh 3 (sơ đồ 4 khối)** — Long tự dựng bằng công cụ dựng cũng được, không cần quay.
@@ -221,15 +221,29 @@ Thanh Dock, bookmark | ẩn / dọn gọn |
 ## Bảng số cảnh ⑪ — dựng sạch, đừng quay code
 
 ```
-Bỏ lọt sự cố          4 / 25          recall 84%
-Báo nhầm              5 / 25
-Xếp mức độ đúng      17 / 21
-Cổng người duyệt     100% không bị vượt qua
-Chi phí hạ tầng       0 đồng
+Phát hiện → đề xuất kèm runbook        39 giây
+Tỷ lệ lỗi sau khắc phục               100% → 0%
+Request thành công sau rollback        120 / 120
+Cổng người duyệt bị vượt qua           0 lần
+Chi phí hạ tầng                        0 đồng
 ```
 
-> ⚠️ **Kiểm lại số trước khi dựng.** Nguồn: `eval/RESULTS-2026-08-21.md` §1. Nếu Đức đo
-> lại thì con số có thể đổi — hỏi Đức một câu trước khi render.
+Năm dòng này là **giá trị giao được**, không phải điểm thi. 30 giây cuối BTC yêu cầu
+*"giá trị cốt lõi và **kết quả**"* — recall/precision là điểm thi, và kết video bằng
+*"bỏ lọt 4, báo nhầm 5"* là kết bằng thiếu sót.
+
+> ⚠️ **`39 giây` phải lấy từ chính lần quay, không chép số này.**
+>
+> Nó là hiệu số hai mốc trong log ở cảnh ⑥: dòng `Phát hiện sự cố` → dòng `đề xuất
+> rollback`. Lần chạy 22/08 ra 39 giây (`20:27:42` → `20:28:21`). Lần quay của mình ra
+> bao nhiêu thì ghi đúng bấy nhiêu.
+>
+> Bịa một con số nhỏ hơn là phá đúng thứ cả video đang xây. Hỏi Đức mốc thời gian sau
+> khi quay xong cảnh ⑥.
+>
+> Bốn dòng còn lại: `100% → 0%` và `120/120` từ `docs/demo-runbook.md`; `0 lần vượt cổng`
+> có `tests/test_hitl.py` và cảnh ⑧ chứng minh trực tiếp; `0 đồng` là Render free tier +
+> Jira free + quota DashScope miễn phí.
 
 ## Ba giây im lặng ở cảnh ⑤ — đừng cắt
 
@@ -250,19 +264,19 @@ p95 nhanh hơn bình thường"*, thì cảnh 6 chỉ còn là *"AI đọc log"*
 0:40 ─ 0:48   SHOT B (Flow 8s)           ┐
 0:48 ─ 0:58   04-gay-su-co.mov           ┘ cảnh 4
 0:58 ─ 1:20   05-so-do-mu.mov              cảnh 5  ⚠️ KHÔNG CẮT
-1:20 ─ 1:50   06-agent-vao-cuoc.mov        cảnh 6 — dài nhất
-1:50 ─ 2:04   07-war-room.mov              cảnh 7
+1:20 ─ 1:45   06-agent-vao-cuoc.mov        cảnh 6 — dài nhất
+1:45 ─ 2:04   07-war-room.mov              cảnh 7 — có câu "kể tên 4 cái bỏ lọt"
 2:04 ─ 2:14   08-bi-chan.mov               cảnh 8  ⚠️ KHÔNG CẮT
 2:14 ─ 2:30   09-nguoi-duyet.mov           cảnh 9
-2:30 ─ 2:40   10-tu-xac-nhan.mov         ┐
-2:40 ─ 2:46   SHOT C (Flow 6s)           ┘ cảnh 10
-2:46 ─ 3:00   bảng số (Long dựng)          cảnh 11 ⚠️ KHÔNG CẮT
+2:30 ─ 2:38   10-tu-xac-nhan.mov         ┐
+2:38 ─ 2:44   SHOT C (Flow 6s)           ┘ cảnh 10
+2:44 ─ 3:00   bảng số (Long dựng)          cảnh 11 ⚠️ KHÔNG CẮT
 ```
 
 **Lời thoại đầy đủ 11 cảnh ở `video-plan.md` mục B** — đã đếm chữ theo nhịp 150
 chữ/phút. **Đừng thêm chữ**, thêm là tràn giờ.
 
-Tổng: **432 chữ · 180 giây hình · 173 giây đọc** — dư 7 giây cho khoảng lặng.
+Tổng: **435 chữ · 180 giây hình · 174 giây đọc** — dư 6 giây cho khoảng lặng.
 
 ## Nếu tràn giờ, cắt theo thứ tự
 

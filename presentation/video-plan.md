@@ -259,7 +259,7 @@ Kết quả: **p95 ≈ 0,048 giây**.
 
 ---
 
-### Cảnh 6 · 1:20–1:50 · Agent vào cuộc — phần chính
+### Cảnh 6 · 1:20–1:45 · Agent vào cuộc — phần chính
 
 **Màn hình:** Terminal.
 
@@ -275,21 +275,20 @@ Dừng và khoanh **hai dòng log**:
 `log đổi kết luận, post lại lên war room (tin cậy 30% → 70%) — thiếu cột idempotency_key trong bảng payments` | khoanh đỏ, giữ 4 giây |
 
 > "Agent quét, phát hiện, mở phiếu. Rồi nó nói một câu đáng chú ý: *chưa đủ bằng chứng
-> để nêu nguyên nhân gốc*. Nó thấy có một lần deploy trùng thời gian — và nói thẳng
-> **trùng thời gian chưa phải nhân quả**.
+> để nêu nguyên nhân gốc*. Nó thấy một lần deploy trùng thời gian — và nói thẳng **trùng
+> thời gian chưa phải nhân quả**.
 >
-> Sau đó nó đọc log của service. Và tìm ra: **thiếu một cột trong database**. Độ tin cậy
-> từ ba mươi lên bảy mươi phần trăm. **Không con số nào chứa được thông tin đó** — chỉ
-> log có."
+> Sau đó nó đọc log. Và tìm ra: **thiếu một cột trong database**. Tin cậy từ ba mươi lên
+> bảy mươi phần trăm. **Không con số nào chứa được thông tin đó.**"
 
-*(75 chữ · 30 giây)*
+*(62 chữ · 25 giây)*
 
 > **Đọc chậm bốn chữ *"chưa xác minh nhân quả"*.** Đó là chỗ chứng minh hệ thống biết
 > ranh giới hiểu biết của nó — và gần như không dự án nào dám in câu đó ra màn hình.
 
 ---
 
-### Cảnh 7 · 1:50–2:04 · War room — bằng chứng truy vết được
+### Cảnh 7 · 1:45–2:04 · War room — bằng chứng truy vết được
 
 **Màn hình:** F5 `localhost:8501/war_room` → mở phiếu vừa tạo. Chỉ **hai** thao tác,
 đừng cuộn lung tung:
@@ -298,9 +297,20 @@ Dừng và khoanh **hai dòng log**:
 2. Bấm **"kiểm chứng PromQL"** → mở tab Prometheus, ra **cùng một con số**
 
 > "Mọi con số trên trang này đều kèm câu truy vấn gốc. Bấm vào là mở thẳng Prometheus —
-> ra đúng con số đó. Người trực **không phải tin Agent**, họ kiểm lại được."
+> ra đúng con số đó. Người trực **không phải tin Agent**, họ kiểm lại được.
+>
+> Trong tài liệu bọn em cũng **kể tên bốn tình huống Agent bỏ lọt**, gồm cả loại mà số
+> đo không thể thấy được."
 
-*(35 chữ · 14 giây)*
+*(47 chữ · 19 giây)*
+
+> **Câu *"kể tên bốn tình huống Agent bỏ lọt"* là câu đáng giá nhất cả video.** Không
+> nhóm nào tự nói ra chỗ mình mù.
+>
+> Đặt ở đây, không ở cảnh 11: cảnh này đang nói về **tính minh bạch** nên nó thuộc mạch;
+> còn cảnh 11 là 30 giây cuối, phải kết bằng **kết quả** chứ không bằng thiếu sót.
+>
+> Bốn tình huống đó kể tên trong [`eval/RESULTS-2026-08-21.md`](../eval/RESULTS-2026-08-21.md) §3.
 
 ---
 
@@ -343,9 +353,9 @@ tự hiện. Rồi mở **History** của phiếu.
 
 ## PHẦN 3 · GIÁ TRỊ + KẾT QUẢ · 2:30–3:00
 
-### Cảnh 10 · 2:30–2:46 · Agent tự xác nhận đã khỏi
+### Cảnh 10 · 2:30–2:44 · Agent tự xác nhận đã khỏi
 
-**10 giây đầu là terminal, 6 giây cuối là SHOT C** *(xem mục C)*.
+**8 giây đầu là terminal, 6 giây cuối là SHOT C** *(xem mục C)* — shot C ở 2:38–2:44.
 
 **Màn hình:** Terminal.
 
@@ -359,36 +369,54 @@ Dòng cần khoanh: `verify service-thanh-toan: không còn tín hiệu sự c�
 > "Agent tự đo lại, bằng **đúng những truy vấn đã phát hiện ra sự cố**. Trước: không
 > một request nào thành công. Sau: tất cả. Tỷ lệ lỗi từ một trăm phần trăm về **không**."
 
-*(36 chữ · 16 giây)*
+*(36 chữ · 14 giây)*
 
 **Hậu kỳ:** overlay `100% → 0%` thật to, giữ tới hết cảnh.
 
 ---
 
-### Cảnh 11 · 2:46–3:00 · Con số đo được
+### Cảnh 11 · 2:44–3:00 · Con số đo được
 
 **Màn hình:** bảng, dựng sạch — **không** quay code:
 
 ```
-Bỏ lọt sự cố          4 / 25          recall 84%
-Báo nhầm              5 / 25
-Xếp mức độ đúng      17 / 21
-Cổng người duyệt     100% không bị vượt qua
-Chi phí hạ tầng       0 đồng
+Phát hiện → đề xuất kèm runbook        39 giây
+Tỷ lệ lỗi sau khắc phục               100% → 0%
+Request thành công sau rollback        120 / 120
+Cổng người duyệt bị vượt qua           0 lần
+Chi phí hạ tầng                        0 đồng
 ```
 
-> "Đo trên năm mươi tình huống thật. Bắt được hai mươi mốt trên hai mươi lăm — và bọn
-> em **kể tên bốn cái bỏ lọt**, gồm cả loại số đo không thể thấy. Cổng người duyệt:
-> chưa lần nào bị vượt qua."
+> "Phát hiện đến đề xuất kèm runbook: **ba mươi chín giây**. Sau khi người duyệt bấm,
+> tỷ lệ lỗi về **không**. Cổng người duyệt chưa lần nào bị vượt qua. Toàn bộ chạy trên
+> hạ tầng miễn phí."
 
-*(34 chữ · 14 giây)*
+*(38 chữ · 16 giây)*
 
-> **Câu *"kể tên bốn cái bỏ lọt"* là câu đáng giá nhất cả video.** Không nhóm nào tự nói
-> ra chỗ mình mù. Nó biến một con số bình thường (84%) thành bằng chứng về **phương pháp**
-> — và đó là thứ khó bắt chước hơn một con số đẹp.
+> **Vì sao bảng này chứ không phải bảng recall/precision:** 30 giây cuối BTC yêu cầu
+> *"giá trị cốt lõi và **kết quả**"*. Recall 84% là **điểm thi**, không phải kết quả —
+> và kết video bằng "bỏ lọt 4, báo nhầm 5" là kết bằng thiếu sót.
 >
-> Số liệu lấy từ [`eval/RESULTS-2026-08-21.md`](../eval/RESULTS-2026-08-21.md) §1. **Kiểm
-> lại trước khi quay** — nếu đã đo lại thì con số có thể đổi.
+> Năm dòng trên đều là **việc đã giao được**, và đều **đo được, lặp lại được** — không
+> dòng nào là tỷ lệ trên bộ case tự dựng. Phần recall/precision để trong slide và
+> `eval/RESULTS-2026-08-21.md`, chỗ có không gian giải thích khoảng tin cậy.
+>
+> **39 giây là con số mạnh nhất**, vì nó so được ngầm: 2 giờ sáng, một người phải mở
+> laptop, đăng nhập, tìm log — mất bao lâu mới tới được câu *"thiếu cột `idempotency_key`,
+> rollback về v1.4.2"*?
+
+## Nguồn năm con số — kiểm lại trước khi quay
+
+| Dòng | Lấy từ | Cách kiểm lại |
+|---|---|---|
+**39 giây** | log lần chạy 22/08, KAN-61: `20:27:42` phát hiện → `20:28:21` đề xuất | đọc mốc thời gian trong log cảnh 6 của **chính lần quay** |
+**100% → 0%** | `docs/demo-runbook.md` | cảnh 10 |
+**120/120** | `docs/demo-runbook.md` | đầu ra `run_measurements.py` ở cảnh 10 |
+**0 lần vượt cổng** | `tests/test_hitl.py` | cảnh 8 chứng minh trực tiếp |
+**0 đồng** | Render free tier · Jira free · DashScope quota miễn phí | — |
+
+> ⚠️ **39 giây phải lấy từ lần quay thật, không chép số cũ.** Nếu lần quay ra 45 giây thì
+> ghi 45. Bịa một con số nhỏ hơn là phá đúng thứ cả video đang xây.
 
 ---
 
