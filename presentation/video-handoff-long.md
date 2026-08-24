@@ -7,11 +7,11 @@ Long dán gì vào Flow · ai quay phần nào · lắp lại thế nào.
 
 | Phần | Ai | Ghi chú |
 |---|---|---|
-**2 shot B-roll** *(18 giây)* | **Long** — gen bằng Flow | prompt ở §1 |
-**9 cảnh màn hình** *(162 giây)* | **Đức** — quay màn hình | Đức có stack chạy được |
+**3 shot B-roll** *(28 giây)* | **Long** — gen bằng Flow | prompt ở §1 |
+**9 cảnh màn hình** *(152 giây)* | **Đức** — quay màn hình | Đức có stack chạy được |
 **Overlay + lồng tiếng + dựng** | **Long** | danh sách ở §3 |
 
-> ⚠️ **Flow không gen được phần sản phẩm.** 162 giây kia là màn hình thật: terminal,
+> ⚠️ **Flow không gen được phần sản phẩm.** 152 giây kia là màn hình thật: terminal,
 > war room, Jira. Đó là điểm mạnh nhất của dự án — mọi con số đều thật, kiểm lại được.
 > Gen phần đó bằng AI là **tự phá** thứ duy nhất khó bắt chước.
 >
@@ -19,26 +19,33 @@ Long dán gì vào Flow · ai quay phần nào · lắp lại thế nào.
 
 ---
 
-# §1. Hai prompt dán vào Flow
+# §1. Ba prompt dán vào Flow
+
+## Ba shot, tổng 28 giây
+
+    SHOT A  14s   0:00        sự bình yên
+    SHOT B   8s   0:40        nghịch lý — điện thoại reo, đường xanh không đổi
+    SHOT C   6s   2:40        đóng vòng — cùng khung, trời đã sáng
 
 ## ⚠️ Đọc trước: giới hạn độ dài clip
 
 Flow gen mỗi lần khoảng **8 giây**. Nên **shot A không gen một lần được** nếu muốn 14
 giây. Hai cách:
 
-- **Cách nên làm:** gen shot A **8 giây**, rồi 6 giây còn lại của cảnh 1 dùng **màn hình
-  trạng thái thật** *(Đức quay)*. Vào sản phẩm thật sớm hơn — tốt hơn cho phần chấm.
-- Cách hai: gen 2 clip cùng khung rồi cắt nối. Tốn công, dễ lệch màu.
+- **Nếu Flow gen được 14 giây một lần** → làm luôn, cắt liền mạch hơn.
+- **Nếu chỉ được 8 giây** → gen 2 clip cùng khung rồi nối, hoặc gen 8 giây và 6 giây còn
+  lại dùng màn hình trạng thái thật *(Đức quay)*. Lời thoại cảnh 1 chạy xuyên 14 giây nên
+  không lệch.
 
-Nếu Flow bản Long dùng cho phép dài hơn 8 giây thì cứ gen 14 giây một lần.
+Shot B (8s) và shot C (6s) thì gen một lần được.
 
 ## Cài đặt Flow
 
 ```
 Tỷ lệ khung   16:9
-Độ dài        8 giây (shot A) · 4 giây (shot B)
+Độ dài        14s (A) · 8s (B) · 6s (C)
 Âm thanh      bật, theo khối [AUDIO]
-Gen           3–4 lần mỗi shot, chọn cặp KHỚP KHUNG nhất
+Gen           3–4 lần mỗi shot, chọn bộ KHỚP KHUNG nhất
 ```
 
 Hai màu lấy từ `ui/theme.py` — `#52B788` là `--ok`, `#E5484D` là `--p1`. Dùng đúng
@@ -46,7 +53,7 @@ token của sản phẩm để cắt sang màn hình thật không lệch màu.
 
 ---
 
-## SHOT A · 8 giây · đặt ở 0:00 · *sự bình yên*
+## SHOT A · 14 giây · đặt ở 0:00 · *sự bình yên*
 
 ```
 [STYLE]
@@ -57,9 +64,9 @@ faint green, showing only a single perfectly flat horizontal line — no text,
 no numbers, unreadable at this distance. Nothing moves. A half-empty glass
 of water catches a thin cold rim of moonlight. The room is asleep.
 
-Camera: locked-off macro, almost imperceptible push-in. Focus stays on the
-dark phone in the foreground; the green line stays soft and out of focus in
-the background.
+Camera: locked-off macro, almost imperceptible push-in over 14 seconds.
+Focus stays on the dark phone in the foreground; the green line stays soft
+and out of focus in the background.
 Lighting: single soft green wash #52B788 from the out-of-focus laptop, very
 low intensity. One thin cold blue moonlight rim from a window behind. Near
 black everywhere else.
@@ -77,25 +84,26 @@ movement, camera shake
 
 ---
 
-## SHOT B · 4 giây · đặt ở **đầu cảnh 4 (0:40)** · *nghịch lý*
+## SHOT B · 8 giây · đặt ở **đầu cảnh 4 (0:40)** · *nghịch lý*
 
 ```
 [STYLE]
 Same bedside table, same darkness, identical framing to the previous shot.
 The phone screen lights up and the phone buzzes hard against the wood,
-rattling once, twice. Behind it, still out of focus, the laptop's green line
-stays perfectly flat and perfectly green — completely unchanged. The
+rattling once, twice, then a third time. Behind it, still out of focus, the
+laptop's green line stays perfectly flat and perfectly green — completely
+unchanged. The
 contradiction is the point: the phone is screaming, the screen says fine.
-Hold on the unchanged green line for the final second, not on the phone.
+Hold on the unchanged green line for the final three seconds, not on the phone.
 
-Camera: locked-off, identical to previous shot. In the last second, focus
-racks from the buzzing phone to the flat green line behind it.
+Camera: locked-off, identical to previous shot. In the last three seconds,
+focus racks slowly from the buzzing phone to the flat green line behind it.
 Lighting: unchanged soft green #52B788 wash. The phone's own screen light
 is cold white and blown out, illegible.
 
 [AUDIO]
 One second of silence. Then an aggressive phone vibration rattling against
-wood, twice. Then silence again. No music, no alert sting, no sub-bass.
+wood, three times. Then silence again. No music, no alert sting, no sub-bass.
 
 [NEGATIVE]
 red light, red colour anywhere, red alerts, alert icons, warning symbols,
@@ -103,18 +111,61 @@ spiking graphs, falling line charts, readable text, numbers, sirens,
 dramatic music, sub-bass swell, people, faces, hands
 ```
 
+---
+
+## SHOT C · 6 giây · đặt ở **2:40**, sau cảnh 10 · *đóng vòng*
+
+Cùng khung hình với shot A, nhưng **trời đã sáng**. Người xem hiểu ngay mà không cần nói:
+*sự cố xong rồi, người trực về ngủ tiếp.* Đây là **giá trị sản phẩm nói bằng hình** — đúng
+thứ BTC muốn ở 30 giây cuối.
+
+```
+[STYLE]
+Same bedside table, same framing as the opening shot — but now early dawn.
+The smartphone lies face-down again, screen off, completely still. Behind it,
+still out of focus, the laptop's green line is flat and unchanged. The glass
+of water is now lit by pale warm dawn light from the window instead of cold
+moonlight. Everything is calm. Time has passed and nothing is on fire.
+
+Camera: locked-off, identical framing to the opening shot, no push-in.
+Completely static.
+Lighting: soft warm dawn light from the window, low and diffuse. The green
+#52B788 glow from the out-of-focus laptop is still there but weaker now that
+the room has ambient light.
+
+[AUDIO]
+Quiet room tone. Faint early morning birds, very distant. Nothing else.
+No music, no phone, no alert.
+
+[NEGATIVE]
+red light, red colour anywhere, alert icons, warning symbols, flashing,
+readable text, numbers, letters, spiking or falling graphs, sirens, music,
+uplifting score, people, faces, hands, movement, camera shake, sunrise
+timelapse, lens flare
+```
+
+> `sunrise timelapse` và `lens flare` trong `[NEGATIVE]` để chặn thứ mô hình rất hay tự
+> thêm — nó biến cảnh tĩnh thành clip du lịch.
+>
+> **Đừng để chữ nào trong shot C**, kể cả logo hay tên nhóm. Muốn card cuối có tên nhóm
+> thì Long dựng riêng — chữ Flow gen ra ký tự méo.
+>
+> **Đừng thêm nhạc "vươn lên".** Tiếng chim xa xa với im lặng nói được nhiều hơn.
+
+---
+
 ## Ba lưu ý khi gen
 
 **① `readable text, numbers, letters` là dòng quan trọng nhất trong `[NEGATIVE]`.**
 Mọi mô hình gen video dựng chữ thành ký tự méo. Video này cắt sang màn hình **thật**
 ngay sau đó.
 
-**② Không để mặt người.** Bỏ người thì mất luôn hai rủi ro: nhân vật khác nhau giữa hai
+**② Không để mặt người.** Bỏ người thì mất luôn hai rủi ro: nhân vật khác nhau giữa các
 shot, và tay/mắt bị dựng méo. *(Prompt gốc có `[CHARACTER]` chưa định nghĩa — đã bỏ.)*
 
-**③ Giữ nguyên khung giữa hai shot** — `identical framing` trong prompt B. Đây là chỗ
-làm nên hiệu quả: người xem thấy **cái gì đã đổi, cái gì không đổi**. Gen tới khi được
-một cặp khớp.
+**③ Giữ nguyên khung cho cả ba shot** — `identical framing` trong prompt B và C. Đây là
+chỗ làm nên hiệu quả: người xem thấy **cái gì đã đổi, cái gì không đổi** giữa 2 giờ sáng
+và lúc trời sáng. Gen tới khi được một bộ khớp.
 
 **④ Không có màu đỏ nào.** Cảnh 1 là lúc **chưa có sự cố**, và luận điểm của dự án là
 *"hệ thống cháy mà số đo vẫn nói ổn"*. Màn đỏ minh hoạ đúng câu chuyện *"monitor bắt
@@ -127,15 +178,15 @@ một cặp khớp.
 Đức quay theo `video-plan.md` mục B, xuất **9 file rời**, đặt tên đúng thứ tự:
 
 ```
-02-trang-trang-thai.mov      6s    trang xanh, không rê chuột
-03-so-do-agent.mov          14s    sơ đồ 4 khối (hoặc Long tự dựng, xem dưới)
-04-gay-su-co.mov            16s    terminal, đã tua nhanh ×6
+02-trang-trang-thai.mov      8s    trang xanh, không rê chuột
+03-so-do-agent.mov          18s    sơ đồ 4 khối (hoặc Long tự dựng, xem dưới)
+04-gay-su-co.mov            10s    terminal, đã tua nhanh ×6
 05-so-do-mu.mov             22s    terminal, PromQL ra p95 = 0,048
-06-agent-vao-cuoc.mov       32s    terminal, 2 dòng log cần khoanh
-07-war-room.mov             16s    war room + bấm kiểm chứng PromQL
+06-agent-vao-cuoc.mov       30s    terminal, 2 dòng log cần khoanh
+07-war-room.mov             14s    war room + bấm kiểm chứng PromQL
 08-bi-chan.mov              10s    terminal, duyet.py bị từ chối
 09-nguoi-duyet.mov          14s    Jira: kéo phiếu + mở History
-10-tu-xac-nhan.mov          14s    terminal, verify → đã hồi phục
+10-tu-xac-nhan.mov          10s    terminal, verify → đã hồi phục
 ```
 
 **Cảnh 3 (sơ đồ 4 khối)** — Long tự dựng bằng công cụ dựng cũng được, không cần quay.
@@ -193,25 +244,25 @@ p95 nhanh hơn bình thường"*, thì cảnh 6 chỉ còn là *"AI đọc log"*
 # §4. Lắp lại — dòng thời gian
 
 ```
-0:00 ─ 0:08   SHOT A (Flow)              ┐
-0:08 ─ 0:14   02-trang-trang-thai.mov    ┘ lời thoại cảnh 1 chạy xuyên cả 14 giây
-0:14 ─ 0:26   02-trang-trang-thai.mov      cảnh 2
-0:26 ─ 0:40   03-so-do-agent               cảnh 3 — chân dung Agent
-0:40 ─ 0:44   SHOT B (Flow)              ┐
-0:44 ─ 0:56   04-gay-su-co.mov           ┘ cảnh 4
-0:56 ─ 1:18   05-so-do-mu.mov              cảnh 5  ⚠️ KHÔNG CẮT
-1:18 ─ 1:50   06-agent-vao-cuoc.mov        cảnh 6 — dài nhất
-1:50 ─ 2:06   07-war-room.mov              cảnh 7
-2:06 ─ 2:16   08-bi-chan.mov               cảnh 8  ⚠️ KHÔNG CẮT
-2:16 ─ 2:30   09-nguoi-duyet.mov           cảnh 9
-2:30 ─ 2:44   10-tu-xac-nhan.mov           cảnh 10
-2:44 ─ 3:00   bảng số (Long dựng)          cảnh 11 ⚠️ KHÔNG CẮT
+0:00 ─ 0:14   SHOT A (Flow 14s)            cảnh 1
+0:14 ─ 0:22   02-trang-trang-thai.mov      cảnh 2
+0:22 ─ 0:40   03-so-do-agent               cảnh 3 — chân dung Agent
+0:40 ─ 0:48   SHOT B (Flow 8s)           ┐
+0:48 ─ 0:58   04-gay-su-co.mov           ┘ cảnh 4
+0:58 ─ 1:20   05-so-do-mu.mov              cảnh 5  ⚠️ KHÔNG CẮT
+1:20 ─ 1:50   06-agent-vao-cuoc.mov        cảnh 6 — dài nhất
+1:50 ─ 2:04   07-war-room.mov              cảnh 7
+2:04 ─ 2:14   08-bi-chan.mov               cảnh 8  ⚠️ KHÔNG CẮT
+2:14 ─ 2:30   09-nguoi-duyet.mov           cảnh 9
+2:30 ─ 2:40   10-tu-xac-nhan.mov         ┐
+2:40 ─ 2:46   SHOT C (Flow 6s)           ┘ cảnh 10
+2:46 ─ 3:00   bảng số (Long dựng)          cảnh 11 ⚠️ KHÔNG CẮT
 ```
 
 **Lời thoại đầy đủ 11 cảnh ở `video-plan.md` mục B** — đã đếm chữ theo nhịp 150
 chữ/phút. **Đừng thêm chữ**, thêm là tràn giờ.
 
-Tổng: **414 chữ · 180 giây · 138 chữ/phút**.
+Tổng: **432 chữ · 180 giây hình · 173 giây đọc** — dư 7 giây cho khoảng lặng.
 
 ## Nếu tràn giờ, cắt theo thứ tự
 

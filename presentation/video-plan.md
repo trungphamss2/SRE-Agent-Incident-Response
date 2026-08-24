@@ -9,10 +9,14 @@ git history — ý "thử ép thi hành, bị chặn" của Long được giữ,
 2:30 ── 3:00   GIÁ TRỊ + KẾT QUẢ               30 giây
 ```
 
+Trong đó **28 giây là B-roll gen bằng Flow** (3 shot: 14 + 8 + 6), **152 giây là màn hình
+thật**. B-roll chạy dưới lời thoại có sẵn nên không ăn thêm giây nào của phần sản phẩm.
+
 Nhịp đọc **150 chữ/phút = 2,5 chữ/giây**. Mỗi cảnh đã đếm chữ — **đừng thêm chữ**,
 thêm là tràn giờ và phải cắt hình.
 
-Tổng lời thoại: **~430 chữ**. Ngân sách tối đa 450.
+Tổng lời thoại: **425 chữ / 170 giây đọc**. Ba giây còn lại là khoảng lặng cố ý ở cảnh 5
+— xem lý do ở đó. Đừng lấp.
 
 ---
 
@@ -167,32 +171,30 @@ ngoài nét phía sau.
 
 ---
 
-### Cảnh 2 · 0:14–0:26 · Vì sao monitor không đủ
+### Cảnh 2 · 0:14–0:22 · Vì sao monitor không đủ
 
 **Màn hình:** trang trạng thái thật, `localhost:8501` — hai thẻ xanh, *"Hoạt động
 bình thường"*. Không rê chuột.
 
-> "Công cụ theo dõi trả lời được *có gì đó sai*. Nó không trả lời được **sai cái gì**,
-> và **nên làm gì**. Khoảng trống đó, hiện tại là con người lấp bằng kinh nghiệm — lúc
-> hai giờ sáng."
+> "Công cụ theo dõi trả lời được *có gì đó sai*. Nó không nói được **sai cái gì**, và
+> **nên làm gì**."
 
-*(36 chữ · 12 giây)*
+*(20 chữ · 8 giây)*
 
 ---
 
-### Cảnh 3 · 0:26–0:40 · Chân dung Agent
+### Cảnh 3 · 0:22–0:40 · Chân dung Agent
 
 **Màn hình:** sơ đồ 4 khối, dựng đơn giản — `PHÁT HIỆN → CHẨN ĐOÁN → ĐỀ XUẤT → CHỜ
 DUYỆT`. Khối cuối tô khác màu.
 
-> "Agent này làm bốn việc: **phát hiện** sự cố từ số đo, **chẩn đoán** nguyên nhân —
-> kể cả khi phải đọc log, **đề xuất** cách khắc phục kèm rủi ro, rồi **tự đo lại** sau
-> khi sửa.
+> "Agent làm bốn việc: **phát hiện** từ số đo, **chẩn đoán** nguyên nhân — kể cả khi
+> phải đọc log, **đề xuất** cách khắc phục kèm rủi ro, rồi **tự đo lại** sau khi sửa.
 >
 > Việc duy nhất nó **không** làm là tự bấm nút. Mọi hành động lên hệ thống thật đều
-> phải có người duyệt. Đó là thiết kế, không phải giới hạn."
+> phải có người duyệt."
 
-*(58 chữ · 14 giây — đọc nhanh, đây là nhịp dày nhất)*
+*(45 chữ · 18 giây)*
 
 > **Vì sao câu cuối phải nằm ở đây, không để tới cảnh 8:** giám khảo nghe *"AI vận hành
 > production"* là nghĩ ngay *"nguy hiểm"*. Trả lời trước thì 100 giây sau đó họ xem với
@@ -202,7 +204,9 @@ DUYỆT`. Khối cuối tô khác màu.
 
 ## PHẦN 2 · DEMO VẬN HÀNH · 0:40–2:30
 
-### Cảnh 4 · 0:40–0:56 · Gây sự cố thật
+### Cảnh 4 · 0:40–0:58 · Gây sự cố thật
+
+**8 giây đầu là SHOT B** *(xem mục C)*, 10 giây sau là terminal.
 
 **Màn hình:** Terminal.
 
@@ -219,13 +223,13 @@ python eval/run_measurements.py payment-load --seconds 80 --concurrency 3 --paus
 > dịch, nhưng **quên chạy migration** — cột trong database chưa tồn tại. Giờ không ai
 > thanh toán được."
 
-*(40 chữ · 16 giây)*
+*(40 chữ · 18 giây)*
 
 **Hậu kỳ:** khoanh đỏ dòng thống kê, giữ 2 giây. Overlay chữ **`0 request thành công`**.
 
 ---
 
-### Cảnh 5 · 0:56–1:18 · SỐ ĐO MÙ — **đây là lý do sản phẩm tồn tại**
+### Cảnh 5 · 0:58–1:20 · SỐ ĐO MÙ — **đây là lý do sản phẩm tồn tại**
 
 **Màn hình:** Terminal.
 
@@ -236,12 +240,11 @@ curl -s -G localhost:9090/api/v1/query --data-urlencode \
 
 Kết quả: **p95 ≈ 0,048 giây**.
 
-> "Và đây là chỗ công cụ monitor bó tay. Lỗi gần một trăm phần trăm — nhưng thời gian
-> phản hồi chỉ **bốn mươi tám mili giây**, nhanh hơn cả lúc bình thường. Vì request chết
-> ngay ở câu lệnh đầu, chưa kịp chậm. Pool thì rảnh. Nhìn ba con số này mà đoán ra nguyên
-> nhân là **không thể**."
+> "Và đây là chỗ monitor bó tay. Lỗi gần một trăm phần trăm — nhưng thời gian phản hồi
+> chỉ **bốn mươi tám mili giây**, nhanh hơn cả lúc bình thường, vì request chết ngay ở
+> câu lệnh đầu. Pool thì rảnh. Nhìn ba con số này mà đoán nguyên nhân là **không thể**."
 
-*(55 chữ · 22 giây)*
+*(48 chữ · 19 giây đọc + 3 giây IM LẶNG = 22 giây)*
 
 **Hậu kỳ:** overlay ba ô cạnh nhau —
 `Lỗi 99%` *(đỏ)* · `p95 0,048s` *(xanh)* · `Pool 0%` *(xanh)*
@@ -256,7 +259,7 @@ Kết quả: **p95 ≈ 0,048 giây**.
 
 ---
 
-### Cảnh 6 · 1:18–1:50 · Agent vào cuộc — phần chính
+### Cảnh 6 · 1:20–1:50 · Agent vào cuộc — phần chính
 
 **Màn hình:** Terminal.
 
@@ -279,14 +282,14 @@ Dừng và khoanh **hai dòng log**:
 > từ ba mươi lên bảy mươi phần trăm. **Không con số nào chứa được thông tin đó** — chỉ
 > log có."
 
-*(80 chữ · 32 giây)*
+*(75 chữ · 30 giây)*
 
 > **Đọc chậm bốn chữ *"chưa xác minh nhân quả"*.** Đó là chỗ chứng minh hệ thống biết
 > ranh giới hiểu biết của nó — và gần như không dự án nào dám in câu đó ra màn hình.
 
 ---
 
-### Cảnh 7 · 1:50–2:06 · War room — bằng chứng truy vết được
+### Cảnh 7 · 1:50–2:04 · War room — bằng chứng truy vết được
 
 **Màn hình:** F5 `localhost:8501/war_room` → mở phiếu vừa tạo. Chỉ **hai** thao tác,
 đừng cuộn lung tung:
@@ -297,11 +300,11 @@ Dừng và khoanh **hai dòng log**:
 > "Mọi con số trên trang này đều kèm câu truy vấn gốc. Bấm vào là mở thẳng Prometheus —
 > ra đúng con số đó. Người trực **không phải tin Agent**, họ kiểm lại được."
 
-*(38 chữ · 16 giây)*
+*(35 chữ · 14 giây)*
 
 ---
 
-### Cảnh 8 · 2:06–2:16 · Cổng chặn — thử ép thi hành
+### Cảnh 8 · 2:04–2:14 · Cổng chặn — thử ép thi hành
 
 **Màn hình:** Terminal.
 
@@ -311,28 +314,27 @@ python scripts/duyet.py KAN-xx
 
 Kết quả: **bị từ chối**.
 
-> "Em thử ép hệ thống thi hành luôn, không qua ai. **Bị chặn.** Phiếu vẫn đang ở cột
-> *chờ phê duyệt* — chưa ai bấm thì không có đường nào đi tiếp."
+> "Em thử ép hệ thống thi hành luôn, không qua ai. **Bị chặn.** Chưa ai bấm thì không
+> có đường nào đi tiếp."
 
-*(30 chữ · 10 giây)*
+*(24 chữ · 10 giây)*
 
 > *(Ý này của Long trong bản 21/08 — giữ lại vì nó là cách mạnh nhất để chứng minh cổng
 > HITL: cho thấy nó **từ chối** trước khi cho thấy nó cho qua.)*
 
 ---
 
-### Cảnh 9 · 2:16–2:30 · Người duyệt — hệ thống sửa thật
+### Cảnh 9 · 2:14–2:30 · Người duyệt — hệ thống sửa thật
 
 **Màn hình:** Jira. Kéo phiếu sang **`Remediating`** bằng tài khoản người. Chờ comment
 tự hiện. Rồi mở **History** của phiếu.
 
-> "Giờ một người thật kéo phiếu sang *Remediating*. Cùng một lệnh với lúc nãy — lúc nãy
-> bị chặn, giờ qua. Em không sửa dòng code nào giữa hai lần; khác duy nhất là **có người
-> bấm nút hay không**.
+> "Giờ một người thật kéo phiếu sang *Remediating*. Cùng một lệnh — lúc nãy bị chặn,
+> giờ qua. Khác duy nhất là **có người bấm nút**.
 >
 > Mở lịch sử phiếu: **hai cái tên khác nhau**. Agent không sửa được lịch sử này."
 
-*(58 chữ · 14 giây — đọc nhanh)*
+*(40 chữ · 16 giây)*
 
 > ⚠️ Trên màn hình **không được** xuất hiện chữ `simulated`. Thấy là quên
 > `REMEDIATION_REAL=1` trên backend — dừng, sửa, quay lại cảnh này.
@@ -341,7 +343,9 @@ tự hiện. Rồi mở **History** của phiếu.
 
 ## PHẦN 3 · GIÁ TRỊ + KẾT QUẢ · 2:30–3:00
 
-### Cảnh 10 · 2:30–2:44 · Agent tự xác nhận đã khỏi
+### Cảnh 10 · 2:30–2:46 · Agent tự xác nhận đã khỏi
+
+**10 giây đầu là terminal, 6 giây cuối là SHOT C** *(xem mục C)*.
 
 **Màn hình:** Terminal.
 
@@ -352,17 +356,16 @@ python scripts/run_agent.py --once
 
 Dòng cần khoanh: `verify service-thanh-toan: không còn tín hiệu sự cố — đã hồi phục`
 
-> "Agent tự đo lại, bằng **đúng những truy vấn đã phát hiện ra sự cố** — nên *đã hồi
-> phục* cùng một định nghĩa với *phát hiện*. Trước: không một request nào thành công.
-> Sau: tất cả. Tỷ lệ lỗi từ một trăm phần trăm về **không**."
+> "Agent tự đo lại, bằng **đúng những truy vấn đã phát hiện ra sự cố**. Trước: không
+> một request nào thành công. Sau: tất cả. Tỷ lệ lỗi từ một trăm phần trăm về **không**."
 
-*(48 chữ · 14 giây)*
+*(36 chữ · 16 giây)*
 
 **Hậu kỳ:** overlay `100% → 0%` thật to, giữ tới hết cảnh.
 
 ---
 
-### Cảnh 11 · 2:44–3:00 · Con số đo được
+### Cảnh 11 · 2:46–3:00 · Con số đo được
 
 **Màn hình:** bảng, dựng sạch — **không** quay code:
 
@@ -374,12 +377,11 @@ Cổng người duyệt     100% không bị vượt qua
 Chi phí hạ tầng       0 đồng
 ```
 
-> "Bọn em đo trên năm mươi tình huống dựng lại từ số đo thật. Bắt được hai mươi mốt trên
-> hai mươi lăm — và bọn em **kể tên bốn cái bỏ lọt** trong tài liệu, gồm cả loại mà số đo
-> không thể thấy được. Cổng người duyệt: chưa lần nào bị vượt qua. Chạy hết trên hạ tầng
-> miễn phí."
+> "Đo trên năm mươi tình huống thật. Bắt được hai mươi mốt trên hai mươi lăm — và bọn
+> em **kể tên bốn cái bỏ lọt**, gồm cả loại số đo không thể thấy. Cổng người duyệt:
+> chưa lần nào bị vượt qua."
 
-*(52 chữ · 16 giây)*
+*(34 chữ · 14 giây)*
 
 > **Câu *"kể tên bốn cái bỏ lọt"* là câu đáng giá nhất cả video.** Không nhóm nào tự nói
 > ra chỗ mình mù. Nó biến một con số bình thường (84%) thành bằng chứng về **phương pháp**
