@@ -11,7 +11,8 @@ Mọi con số trong đây là số đo được, không phải ước lượng.
 
 | Cửa sổ | Địa chỉ |
 |---|---|
-| **War room** | http://localhost:8501 |
+| **War room** | http://localhost:8501/war_room |
+| Trang trạng thái (khách hàng) | http://localhost:8501 |
 | **Jira board** | https://jibinarybro.atlassian.net/jira/software/projects/KAN/boards/2 |
 | Prometheus | http://localhost:9090 |
 
@@ -23,7 +24,7 @@ Mọi con số trong đây là số đo được, không phải ước lượng.
 ```bash
 docker ps --format '{{.Names}}' | grep p035-demo    # phải ra 4 dòng
 curl -s localhost:8000/api/incidents                 # phải ra [] hoặc danh sách
-curl -s -o /dev/null -w "%{http_code}\n" localhost:8501   # phải ra 200
+curl -s -o /dev/null -w "%{http_code}\n" localhost:8501/war_room   # phải ra 200
 ```
 
 Thiếu cái nào thì bật lại:
@@ -31,7 +32,24 @@ Thiếu cái nào thì bật lại:
 ```bash
 DEMO_POSTGRES_PORT=55432 docker compose -f docker-compose.demo.yml up -d
 python -m uvicorn src.main:app --port 8000                      # terminal 2
-API_URL=http://localhost:8000 streamlit run ui/war_room.py      # terminal 3
+# Ba biến, thiếu cái nào là mất đúng chức năng đó:
+#   API_URL       thiếu → UI đọc dữ liệu trên RENDER, không phải máy này
+#   JIRA_BASE_URL thiếu → KHÔNG bấm được sang Jira (nút hiện "Chưa đặt...")
+#   PROM_URL      thiếu → link "kiểm chứng PromQL" trỏ sai chỗ
+#
+# `ui/pages/war_room.py` đọc bằng `os.getenv`, KHÔNG đọc file `.env` — nên phải
+# truyền tường minh. Đã vấp ngày 21/08: chỉ truyền API_URL và mất hẳn nút sang Jira.
+#
+# ⚠️ Điểm khởi động là `ui/status_page.py`, KHÔNG phải war room. Từ 22/08 hai trang
+# nằm trong một app Streamlit multi-page: một tiến trình phục vụ cả hai.
+#     localhost:8501            → trang trạng thái (cho khách hàng)
+#     localhost:8501/war_room   → WAR ROOM (màn demo chính)
+# Chạy `streamlit run ui/pages/war_room.py` cũng lên được, nhưng khi đó KHÔNG có
+# trang trạng thái, và nút "Xem chi tiết sự cố" trỏ vào chỗ không tồn tại.
+API_URL=http://localhost:8000 \
+JIRA_BASE_URL=https://jibinarybro.atlassian.net \
+PROM_URL=http://localhost:9090 \
+  streamlit run ui/status_page.py   # terminal 3
 ```
 
 > `API_URL` là **bắt buộc**. Thiếu nó, UI đọc backend trên Render chứ không đọc
@@ -215,7 +233,24 @@ Sự cố mà **số đo hoàn toàn mù**: 100% request lỗi, nhưng p95 chỉ
 pkill -f "uvicorn src.main"
 REMEDIATION_REAL=1 python -m uvicorn src.main:app --port 8000 &
 sleep 8
-API_URL=http://localhost:8000 streamlit run ui/war_room.py &
+# Ba biến, thiếu cái nào là mất đúng chức năng đó:
+#   API_URL       thiếu → UI đọc dữ liệu trên RENDER, không phải máy này
+#   JIRA_BASE_URL thiếu → KHÔNG bấm được sang Jira (nút hiện "Chưa đặt...")
+#   PROM_URL      thiếu → link "kiểm chứng PromQL" trỏ sai chỗ
+#
+# `ui/pages/war_room.py` đọc bằng `os.getenv`, KHÔNG đọc file `.env` — nên phải
+# truyền tường minh. Đã vấp ngày 21/08: chỉ truyền API_URL và mất hẳn nút sang Jira.
+#
+# ⚠️ Điểm khởi động là `ui/status_page.py`, KHÔNG phải war room. Từ 22/08 hai trang
+# nằm trong một app Streamlit multi-page: một tiến trình phục vụ cả hai.
+#     localhost:8501            → trang trạng thái (cho khách hàng)
+#     localhost:8501/war_room   → WAR ROOM (màn demo chính)
+# Chạy `streamlit run ui/pages/war_room.py` cũng lên được, nhưng khi đó KHÔNG có
+# trang trạng thái, và nút "Xem chi tiết sự cố" trỏ vào chỗ không tồn tại.
+API_URL=http://localhost:8000 \
+JIRA_BASE_URL=https://jibinarybro.atlassian.net \
+PROM_URL=http://localhost:9090 \
+  streamlit run ui/status_page.py &
 ```
 
 > ⚠️ Đây là chỗ dễ sai nhất. `duyet.py` chỉ gửi HTTP; `executors` chạy trong tiến
@@ -228,7 +263,32 @@ API_URL=http://localhost:8000 streamlit run ui/war_room.py &
 
 ### ① Gây sự cố · 90 giây
 
+> ⚠️ **Hai điều kiện, thiếu là màn chốt tụt xuống "(mô phỏng)" mà không báo lỗi.**
+> Cả hai đều vấp thật khi diễn thử 21/08.
+>
+> **a) Seed lịch sử deploy TRONG 15 PHÚT trước khi gây sự cố.** `seed.py` đặt
+> `v1.4.3` ở mốc *"3 phút trước lúc seed"*, còn `rules.DEPLOY_WINDOW_MINUTES = 15`.
+> Seed từ sáng rồi chạy sự cố buổi chiều thì `correlate_deploy()` trả `None`,
+> Agent kết luận *"không có deploy nào trùng thời gian"* và đề xuất **`scale_up`**
+> thay vì `rollback`. Mà `executors._CHO_PHEP` chỉ cho thi hành thật
+> `("rollback", "service-thanh-toan")` → duyệt xong ra `(mô phỏng)`.
+> Đo lúc vấp: deploy cách sự cố **58,7 phút**.
+>
+> **b) service-thanh-toan KHÔNG được còn phiếu nào đang mở.** `open_war_room()`
+> thấy phiếu mở là chỉ **comment cập nhật**, không chẩn đoán lại và **không đề
+> xuất lại** — phiếu giữ nguyên đề xuất cũ. Đây là hành vi có chủ ý (chống mở
+> trùng), nhưng nghĩa là phải đóng phiếu cũ trước:
+>
+> ```bash
+> python -c "from dotenv import load_dotenv; load_dotenv('.env')
+> from src.config import get_settings
+> from src.services.jira.real import RealJiraClient
+> s=get_settings(); print(RealJiraClient(s.jira_base_url,s.jira_email,s.jira_api_token,s.jira_project_key).find_open_incident('service-thanh-toan'))"
+> ```
+> Ra `None` mới chạy tiếp.
+
 ```bash
+python demo/seed.py        # ← BẮT BUỘC, ngay trước bước dưới
 SIMULATE_MISSING_MIGRATION=1 DEMO_POSTGRES_PORT=55432 \
   docker compose -f docker-compose.demo.yml up -d --force-recreate service-thanh-toan
 sleep 10 && python eval/run_measurements.py payment-load --seconds 80 --concurrency 3 --pause 0.05
@@ -266,7 +326,7 @@ Dừng ở hai dòng:
 
 ### ④ War room · 60 giây
 
-F5 http://localhost:8501 — ba mục ①②③, đọc to ô đỏ *"nó không tự thực hiện"*.
+F5 http://localhost:8501/war_room — ba mục ①②③, đọc to ô đỏ *"nó không tự thực hiện"*.
 
 ### ⑤ Người duyệt + sửa THẬT · 60 giây
 
@@ -411,6 +471,10 @@ hệ thống lúc nào cũng báo thành công.
   nó ngủ sẽ **fail im lặng**. Trước demo phải đánh thức:
   `curl https://p-035-incident-agent.onrender.com/health`
 - **Node `verify`** ✅ **đã có** từ 17/08 — Agent tự đo lại và tự comment kết luận.
+- **Postmortem không cần email**: từ 21/08, postmortem được sinh và ghi lên Jira
+  kể cả khi chưa cấu hình `SMTP_EMAIL` — email chỉ là một đường phát hành. Trước
+  bản vá, thiếu hộp thư là **mất luôn bài học**, và nút "Postmortems" trên war
+  room không bao giờ sáng.
 - ⚠️ `awaiting_keys` chỉ nhớ phiếu mở TRONG tiến trình đó, nên khởi động lại Agent
   là nó quên phiếu đang chờ duyệt — cả `poll_jira_approvals` lẫn `verify` đều
   không chạm tới. Đo được 17/08: KAN-48 duyệt trước khi Agent khởi động thì không
