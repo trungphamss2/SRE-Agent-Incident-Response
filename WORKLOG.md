@@ -988,4 +988,33 @@ Ba lỗi đáng ghi lại vì đều thuộc loại **im lặng trả sai**, ngu
 
 ---
 
+## 2026-08-25
+
+| Member | Task | Status | Output |
+|--------|------|--------|--------|
+| Việt | Quay demo 3 trường hợp HITL trên 3 phiếu Jira độc lập: TH1 người duyệt → Remediating, TH2 người kéo thẳng → Resolved, TH3 hết thời chờ → Agent tự thi hành. Mỗi trường hợp một phiếu riêng, không dính link lan truyền | ✅ Done | `scratchpad/ban_mot_service.py` — bắn đúng MỘT service, khác `demo/loadtest.py` vốn cố ý cho 1/4 request đi qua `/orders` nên nối hai phiếu |
+| Việt | Fix auto-remediation bỏ dở giữa chừng: thi hành xong nhưng phiếu kẹt ở `Remediating`, không ai đóng — "tự xử lý" chỉ đúng một nửa | ✅ Done | `_sinh_postmortem_va_dong()`, `src/services/auto_remediation.py` |
+| Việt | Fix auto-remediation **tự đá vào cổng HITL của chính nó**: chuyển `Remediating` bằng tài khoản Agent kích hoạt đúng Jira rule đang rình trạng thái đó → `assert_human_approved()` từ chối → comment "TỪ CHỐI THỰC THI" nằm ngay cạnh comment "đã rollback thành công" | ✅ Done | chuyển THẲNG `Resolved`; rule `Remediating` không bắn, rule `Resolved` tự bỏ qua nhờ guard "postmortem đã tồn tại" |
+| Việt | Đường auto-fix mất mail postmortem: webhook `resolved` có bắn nhưng bị chính guard chống-trùng chặn lại → không ai nhận được gì, đúng lúc **cần mail nhất** vì không ai đang ngồi xem | ✅ Done | `_gui_mail_postmortem()`, tiêu đề `[Postmortem — Auto]` để phân biệt với đường người-duyệt |
+| Việt | Rà soát ô trống trong postmortem — dựng lại báo cáo từ dữ liệu THẬT của KAN-104 rồi bóc thẻ HTML đếm từng ô, không soi bằng mắt | ✅ Done | **13 ô trống trong file đính kèm, 5 ô trong mail body → 0** |
+| Việt | MTTD chỉ tính được khi có deploy nghi phạm → UC-1/UC-2/UC-3 **không bao giờ** có số | ✅ Done | không deploy thì lấy `signal.breached_for_seconds`. KAN-104: `5 phút` (số đã nằm sẵn trong signal, chưa ai đọc tới) |
+| Việt | "Thời gian chờ phê duyệt" dò tên hành động `propose`/`approve` — mà chỉ `FakeJiraClient` mới ghi tên đó. Jira thật chỉ ghi "chuyển trạng thái", nên với **mọi phiếu thật** ô này luôn rỗng | ✅ Done | suy từ changelog: lúc vào ↔ lúc rời `Awaiting Approval`, có né mốc tự trỏ `Awaiting Approval → Awaiting Approval` do Automation ghi. KAN-104: `1 phút` |
+| Việt | MTTR + tổng thời gian gián đoạn in "Chưa resolved" trên đường auto-fix: báo cáo sinh TRƯỚC khi chuyển `Resolved` nên `resolutiondate` chưa tồn tại | ✅ Done | đóng dấu `resolved_at` ngay sau khi rollback xong; chưa đóng thì đếm tới bây giờ kèm "(đang diễn ra)" |
+| Việt | Cột "Baseline"/"Độ lệch" trong bảng bằng chứng trống 4/4 dòng — chỉ p95 mới có baseline, toàn bộ metric UC-2/UC-3 **không có khái niệm baseline** | ✅ Done | đổi thành "Mốc so sánh"/"Đánh giá", tra ngưỡng thật từ `rules` theo câu PromQL (không chép số). Metric mô tả hình thái thì viết cách đọc thay vì ép ngưỡng |
+| Việt | Điền `ActionItem.owner` — cột "Người phụ trách" trước đó là một cột gạch ngang: việc thì có, người thì không | ✅ Done | lấy người cuối cùng đổi trạng thái phiếu mà không phải Agent (nhận ra Agent qua phần trước `@` của `JIRA_EMAIL`, vì changelog trả `displayName` chứ không trả `accountId`) |
+| Việt | 8 test mới chống tái phát, gồm 2 test quét toàn trang khẳng định không còn ô nào chỉ chứa `—` | ✅ Done | **673 test pass** (665 + 8), ruff sạch |
+
+**Tổng kết ngày:** Ngày khép vòng tự xử lý. Ba trường hợp HITL quay xong trên ba phiếu độc lập, và đúng lúc quay TH3 mới lộ ra đường auto-fix chưa bao giờ chạy trọn: thi hành xong thì dừng ở `Remediating`, không postmortem, không mail, lại còn tự kích hoạt cổng HITL của chính mình để bị từ chối — hai câu chọi nhau trên cùng một phiếu.
+
+Sau đó là đợt rà ô trống. Đáng ghi lại vì cả bốn ô đều thuộc loại **có dữ liệu nhưng không ai đọc tới**, chứ không phải thiếu dữ liệu:
+
+1. `breached_for_seconds = 300` nằm sẵn trong signal của KAN-104, mà ô MTTD vẫn in `—` vì code chỉ biết một đường tính duy nhất (theo deploy).
+2. Mốc duyệt nằm đủ trong changelog Jira, mà ô "chờ phê duyệt" vẫn rỗng vì đi dò tên hành động chỉ tồn tại trong `FakeJiraClient` — lỗi kiểu **chỉ lộ khi chạy thật**, test với fake thì xanh hết.
+3. Ngưỡng phán quyết nằm trong `rules`, mà bảng bằng chứng — thứ đáng ra là chỗ chắc chắn nhất của postmortem — trông như chưa thu thập được gì.
+4. `resolved_at` biết được ngay lúc rollback xong, chỉ là chưa ai đóng dấu.
+
+Cách tìm cũng đáng ghi: không soi ảnh chụp mà **dựng lại báo cáo từ phiếu thật rồi bóc thẻ đếm ô**. Soi mắt thì bỏ sót 8/13 ô nằm dưới màn hình.
+
+---
+
 <!-- Format: copy block trên cho mỗi ngày làm việc -->
