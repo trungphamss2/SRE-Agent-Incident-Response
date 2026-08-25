@@ -95,6 +95,21 @@ API = os.getenv("API_URL", "https://p-035-incident-agent.onrender.com")
 # đường bình thường của trang này là "Prometheus không với tới được" — mọi ô lấy
 # số từ đó phải có đường lùi tử tế, không được vỡ.
 PROM_URL = os.getenv("PROM_URL", "http://localhost:9090")
+
+#: Địa chỉ Prometheus dành cho TRÌNH DUYỆT người xem, khác `PROM_URL` ở trên.
+#:
+#: `PROM_URL` là địa chỉ tiến trình Streamlit tự gọi — luôn `localhost:9090`, và
+#: nên giữ nguyên như vậy: hỏi số đo qua localhost là đi thẳng, không vòng ra
+#: internet rồi quay lại.
+#:
+#: Nhưng nút "Mở trên Prometheus" thì do **trình duyệt** mở. Dùng chung
+#: `PROM_URL` thì link trỏ `localhost:9090` — đúng với người ngồi tại máy chạy
+#: Streamlit, và **chết với mọi người xem từ xa**, tức gần như toàn bộ người
+#: dùng khi trang đã lên tên miền công khai. Mời người ta kiểm chứng bằng một
+#: link không mở được còn tệ hơn không mời.
+#:
+#: Trống thì lùi về `PROM_URL`, giữ nguyên hành vi cũ cho máy chạy local.
+PROM_PUBLIC_URL = os.getenv("PROM_PUBLIC_URL", "") or PROM_URL
 # Chỉ để dựng link "mở phiếu Jira". Không bắt buộc — thiếu thì nút duyệt nói rõ
 # phải thao tác ở đâu, chứ KHÔNG giả vờ đã thi hành.
 JIRA_URL = os.getenv("JIRA_BASE_URL", "").rstrip("/")
@@ -359,7 +374,7 @@ body { overflow: hidden; }
 
 /* ═══════════════ MAIN CONTENT ═══════════════ */
 .content { overflow-y: auto; background: var(--bg-0); scroll-behavior: smooth; }
-.content-inner { max-width: 920px; padding: 32px 44px 80px; }
+.content-inner { max-width: 100%; padding: 32px 44px 80px; }
 .view { display: none; }
 .view.active { display: block; }
 
@@ -546,7 +561,7 @@ body { overflow: hidden; }
 }
 .chart-legend .item { display: flex; align-items: center; gap: 6px; }
 .chart-legend .swatch { width: 10px; height: 2px; border-radius: 1px; }
-.chart-svg { width: 100%; height: 200px; }
+.chart-svg { width: 100%; height: auto; display: block; font-family: var(--font-body); }
 .chart-foot {
   display: flex; justify-content: space-between;
   padding-top: 8px;
@@ -566,6 +581,41 @@ body { overflow: hidden; }
 .evidence:last-child { margin-bottom: 0; }
 .evidence p { color: var(--ink-0); margin-bottom: 12px; }
 .evidence p:last-child { margin-bottom: 0; }
+
+/* Toggle collapsible sections */
+.toggle-section { margin-top: 8px; }
+.toggle-btn {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-0); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer;
+  color: var(--ink-0); font-size: 13px; font-weight: 600;
+  font-family: var(--font-body);
+  padding: 10px 16px; width: 100%; text-align: left;
+  transition: all 0.15s ease;
+}
+.toggle-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-1);
+}
+.toggle-icon {
+  font-size: 10px; transition: transform 0.2s ease;
+  display: inline-block;
+}
+.toggle-section.open .toggle-icon { transform: rotate(90deg); }
+.toggle-section.open .toggle-btn {
+  border-color: var(--accent);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.toggle-content {
+  display: none;
+  border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 8px 8px;
+  padding: 14px 16px;
+  background: var(--bg-1);
+}
+.toggle-section.open .toggle-content { display: block; }
 
 .code-block {
   background: var(--code-bg);
@@ -936,6 +986,13 @@ a.check-item { cursor: pointer; }
 .log-line .lv-error { color: var(--p1); }
 .log-line .lv-warn { color: var(--p2); }
 .log-line .lv-info { color: var(--ok); }
+/* Huy hiệu "×37" cho các dòng lặp lại liên tiếp — xem `_gop_dong_lap()` */
+.log-line .lap {
+  display: inline-block;
+  padding: 0 6px; margin-right: 6px;
+  border: 1px solid var(--border); border-radius: 4px;
+  color: var(--ink-2); font-size: 11px;
+}
 
 /* Màn chờ khi đổi phiếu — đổi phiếu là tải lại trang, không có nó thì cái bấm
    trông như không ăn cho tới lúc trang mới về. */
@@ -1081,7 +1138,8 @@ def link_prometheus(promql: str, luc: str | None) -> str | None:
     )
     # `/graph` bị chuyển hướng 302 sang `/query` ở bản 3.x, và chuyển hướng có
     # giữ nguyên query string — nhưng trỏ thẳng `/query` thì bớt được một chặng.
-    return f"{PROM_URL}/query?{tham_so}"
+    # Link cho TRÌNH DUYỆT, không phải cho tiến trình này — xem `PROM_PUBLIC_URL`.
+    return f"{PROM_PUBLIC_URL}/query?{tham_so}"
 
 
 def _unix(iso: str | None) -> float | None:
@@ -1577,6 +1635,32 @@ def tai_chi_tiet(khoa: str) -> dict:
 
 
 @st.cache_data(ttl=LAM_MOI_GIAY, show_spinner=False)
+def tai_log(khoa: str) -> dict:
+    """Log thô của phiếu đang xem, đọc TƯƠI từ container qua `/api/incidents/{key}/logs`.
+
+    Vì sao không dùng `hypotheses[].log_evidence` có sẵn trong phiếu: nó chỉ được
+    Agent lưu lên Jira khi log **đổi được kết luận** (xem
+    `_post_lai_neu_log_doi_ket_luan` trong incident_graph.py). Đối chiếu 49 phiếu
+    thật ngày 23/08: 15/15 phiếu mà bộ luật đã tự nêu được nguyên nhân đều có
+    ĐÚNG 0 dòng log — dù Agent đã đọc log thật, và dù chính những dòng
+    `pool_in_use=5 pool_size=5` đó mới là thứ chứng minh chẩn đoán.
+
+    TTL ngắn bằng `LAM_MOI_GIAY`: sự cố còn mở thì cửa sổ log kéo tới hiện tại,
+    nên mỗi lần làm mới trang là thấy dòng mới.
+
+    Nuốt lỗi và trả `{}`: mất khung log không đáng làm hỏng cả war room, mà
+    endpoint này lại là endpoint dễ vắng mặt nhất (bản API cũ chưa có nó).
+    """
+    if not khoa:
+        return {}
+    try:
+        goi = _lay_json(f"{API}/api/incidents/{khoa}/logs", timeout=30)
+    except (requests.RequestException, ValueError):
+        return {}
+    return goi if isinstance(goi, dict) else {}
+
+
+@st.cache_data(ttl=LAM_MOI_GIAY, show_spinner=False)
 def prom_song_cached() -> bool:
     """`prom_song()` có cache — mỗi lần dựng trang chỉ dò đúng một lần."""
     return prom_song()
@@ -1812,15 +1896,15 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
         vi_sao = (chuoi or {}).get("loi") or "Prometheus không với tới được"
         than = (
             f"{luoi}"
-            f'<text x="{rong / 2}" y="{cao / 2 - 6}" font-family="Inter" font-size="12" '
+            f'<text x="{rong / 2}" y="{cao / 2 - 6}" font-family="Inter, sans-serif" font-size="12" '
             f'fill="var(--ink-2)" text-anchor="middle">Chưa vẽ được đường nào</text>'
-            f'<text x="{rong / 2}" y="{cao / 2 + 14}" font-family="JetBrains Mono" font-size="10" '
+            f'<text x="{rong / 2}" y="{cao / 2 + 14}" font-family="Inter, sans-serif" font-size="10" '
             f'fill="var(--ink-3)" text-anchor="middle">{e(str(vi_sao)[:90])}</text>'
         )
         chan = "<span>—</span>" * 5
         return (
             f'<div class="chart-panel">{dau_de}'
-            f'<svg class="chart-svg" viewBox="0 0 {rong} {cao}" preserveAspectRatio="none">{than}</svg>'
+            f'<svg class="chart-svg" viewBox="0 0 {rong} {cao}" preserveAspectRatio="xMidYMid meet">{than}</svg>'
             f'<div class="chart-foot">{chan}</div></div>'
         )
 
@@ -1852,7 +1936,7 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
         lop_nguong = (
             f'<line x1="0" y1="{y:.0f}" x2="{rong}" y2="{y:.0f}" stroke="var(--p1)" '
             f'stroke-width="1" stroke-dasharray="4 4" opacity="0.55"/>'
-            f'<text x="6" y="{y - 5:.0f}" font-family="JetBrains Mono" font-size="9" '
+            f'<text x="6" y="{y - 5:.0f}" font-family="Inter, sans-serif" font-size="9" '
             f'fill="var(--p1)" opacity="0.85">ngưỡng {nguong:g}</text>'
         )
     lop_nen = ""
@@ -1877,7 +1961,7 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
         lop_moc += (
             f'<line x1="{x:.0f}" y1="0" x2="{x:.0f}" y2="{cao}" stroke="{mau}" '
             f'stroke-width="1" opacity="0.4" stroke-dasharray="2 3"/>'
-            f'<text x="{x + lech_chu:.0f}" y="14" font-family="JetBrains Mono" font-size="9" '
+            f'<text x="{x + lech_chu:.0f}" y="14" font-family="Inter, sans-serif" font-size="9" '
             f'fill="{mau}" text-anchor="{neo}">{e(chu)}</text>'
         )
 
@@ -1889,7 +1973,7 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
     nhan_gio = []
     for i in range(5):
         t = t0 + (t1 - t0) * i / 4
-        nhan_gio.append(_gio_vn(t).strftime("%cao:%M"))
+        nhan_gio.append(_gio_vn(t).strftime("%H:%M"))
     if not inc.get("resolved_at"):
         nhan_gio[-1] = "Bây giờ"
 
@@ -1908,7 +1992,7 @@ def bang_bieu_do(inc: dict, signal: dict, chuoi: dict | None) -> str:
     chan = "".join(f"<span>{e(n)}</span>" for n in nhan_gio)
     return (
         f'<div class="chart-panel">{dau_de}'
-        f'<svg class="chart-svg" viewBox="0 0 {rong} {cao}" preserveAspectRatio="none">{than}</svg>'
+        f'<svg class="chart-svg" viewBox="0 0 {rong} {cao}" preserveAspectRatio="xMidYMid meet">{than}</svg>'
         f'<div class="chart-foot">{chan}</div></div>'
     )
 
@@ -1923,14 +2007,19 @@ def the_promql(signal: dict, luc: str | None) -> str:
         )
     cau = str(kich_hoat.get("promql", ""))
     link = link_prometheus(cau, luc)
-    return (
-        '<div class="evidence">'
-        "<p>Câu truy vấn dựng nên chỉ số này — dán thẳng vào Prometheus để kiểm chứng lại:</p>"
-        + khoi_code("PromQL", to_mau_promql(cau), nguyen_van=cau)
+    noi_dung = (
+        khoi_code("PromQL", to_mau_promql(cau), nguyen_van=cau)
         + (hang_link(link, "Mở trên Prometheus, đúng thời điểm sự cố") if link else "")
         + '<div class="hint">Link đã gắn sẵn mốc giờ lúc phát hiện. Bỏ mốc đó ra thì '
         "câu này trả rỗng sau khi sự cố qua, vì cửa sổ đo không còn lưu lượng nào.</div>"
-        "</div>"
+    )
+    return (
+        '<div class="evidence">'
+        '<div class="toggle-section">'
+        '<button class="toggle-btn" type="button" onclick="this.parentElement.classList.toggle(\'open\')">'
+        '<span class="toggle-icon">▶</span> Câu truy vấn dán vào Prometheus</button>'
+        f'<div class="toggle-content">{noi_dung}</div>'
+        '</div></div>'
     )
 
 
@@ -1982,41 +2071,176 @@ def the_so_lieu(signal: dict, luc: str | None) -> str:
     return f'<div class="evidence">{"".join(hang)}</div>'
 
 
-def khoi_log(hypotheses: list[dict]) -> str:
-    """Log gốc kèm theo giả thuyết — giữ **nguyên văn** ERROR/WARNING.
+#: `ly_do` từ API → câu giải thích cho người trực. Xem `LY_DO_*` trong
+#: `src/services/log_collector.py`.
+#:
+#: Bốn trạng thái này KHÔNG được gộp thành một câu "không có log". "Chưa có dòng
+#: lỗi nào" là bằng chứng CHỐNG LẠI giả thuyết lỗi ứng dụng; "máy chạy API không
+#: có Docker" là Agent đang mù. Hai câu dẫn tới hai hành động khác hẳn nhau.
+_LY_DO_LOG: dict[str, str] = {
+    "khong-co-docker": (
+        "Máy đang chạy API không có Docker nên không đọc được log container. "
+        "Bản trên Render luôn rơi vào trường hợp này — muốn xem log thì chạy API "
+        "ngay tại máy có demo stack."
+    ),
+    "khong-co-container": (
+        "Không tìm thấy container nào của dịch vụ này đang chạy. Kiểm tra "
+        "<code>docker compose -f docker-compose.demo.yml ps</code>."
+    ),
+    "log-sach": (
+        "Container có chạy và có ghi log, nhưng KHÔNG dòng nào ở mức "
+        "ERROR/WARNING trong cửa sổ này. Đây là một bằng chứng, không phải thiếu "
+        "bằng chứng: nó nói sự cố không đến từ lỗi ứng dụng ghi ra được."
+    ),
+    "ngoai-tam-log": (
+        "Cửa sổ thời gian của sự cố này đã trôi khỏi phần log container còn giữ — "
+        "log cũ bị đẩy ra khi container ghi tiếp. Cũng KHÔNG phải \"service không có "
+        "lỗi\": không còn gì để đọc mà thôi. Phiếu đã đóng từ lâu thì gần như luôn "
+        "rơi vào đây; hãy dùng bằng chứng metric và bản log Agent đã lưu."
+    ),
+    "khong-ro-service": (
+        "Phiếu không nói rõ dịch vụ nào bị ảnh hưởng nên không biết đọc log của ai."
+    ),
+}
+
+
+def _moc_log(ts: str) -> str:
+    """Timestamp một dòng log → giờ Việt Nam dạng `HH:MM:SS`.
+
+    ⚠️ Log của container ghi giờ **UTC không kèm ký hiệu múi giờ** (`basicConfig`
+    trong demo service dùng `datefmt` không có `%z`). `_unix()` gặp chuỗi trần
+    như vậy sẽ hiểu là giờ MÁY NÀY, tức +07 — và mọi dòng log hiện sai đúng 7
+    tiếng, lệch ra ngoài cả cửa sổ sự cố ngay bên cạnh nó. Nên gắn `+00:00` khi
+    chuỗi chưa có múi giờ, rồi mới đổi.
+    """
+    if not ts:
+        return ""
+    try:
+        moc = datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return ts[:19]
+    if moc.tzinfo is None:
+        moc = moc.replace(tzinfo=UTC)
+    return moc.astimezone(VN_TZ).strftime("%H:%M:%S")
+
+
+def _gop_dong_lap(dong: list[dict]) -> list[tuple[dict, int]]:
+    """Gộp các dòng log giống hệt nhau và LIỀN NHAU thành một, kèm số lần lặp.
+
+    Vì sao cần: UC-1 làm `service-thanh-toan` ghi `pool_in_use=5 pool_size=5` mỗi
+    request, nên cửa sổ sự cố có hàng trăm dòng y hệt. Đổ nguyên xi ra màn hình
+    thì khung log dài mấy mét mà nói đúng MỘT điều — và nếu có một dòng khác
+    thường xen giữa, không ai nhìn ra.
+
+    Chỉ gộp dòng LIỀN NHAU, không gộp toàn cục: hai cụm cùng nội dung cách nhau
+    mười phút là hai lần sự việc xảy ra, gộp lại là bóp méo diễn biến.
+    """
+    gop: list[tuple[dict, int]] = []
+    for lg in dong:
+        khoa = (lg.get("level"), lg.get("message"))
+        if gop and (gop[-1][0].get("level"), gop[-1][0].get("message")) == khoa:
+            gop[-1] = (gop[-1][0], gop[-1][1] + 1)
+        else:
+            gop.append((lg, 1))
+    return gop
+
+
+def khoi_log(
+    hypotheses: list[dict],
+    goi_log: dict | None = None,
+    log_da_luu: list[dict] | None = None,
+) -> str:
+    """Log gốc — giữ **nguyên văn** ERROR/WARNING.
 
     Câu tiếng Việt đi ở chú thích phía trên khối, không thay chữ trong log: đó là
     chữ người trực sẽ grep.
-    """
-    dong: list[str] = []
-    nguon: set[str] = set()
-    for h in hypotheses:
-        for lg in h.get("log_evidence") or []:
-            muc_do = str(lg.get("level", "INFO")).upper()
-            lop = {"ERROR": "lv-error", "WARNING": "lv-warn", "WARN": "lv-warn"}.get(muc_do, "lv-info")
-            ts = str(lg.get("timestamp") or "")
-            moc = _unix(ts)
-            hien_ts = _gio_vn(moc).strftime("%H:%M:%S") if moc else ts[:19]
-            nguon.add(str(lg.get("source", "")))
-            mau_pattern = (
-                f' <span class="cm">[{e(lg["pattern"])}]</span>' if lg.get("pattern") else ""
-            )
-            dong.append(
-                f'<span class="log-line"><span class="cm">{e(hien_ts)}</span> '
-                f'<span class="{lop}">{e(muc_do)}</span>{mau_pattern} '
-                f'{e(lg.get("message", ""))}</span>'
-            )
-    if not dong:
-        return ""
 
-    ten_nguon = " · ".join(sorted(x for x in nguon if x)) or "log"
+    Hai nguồn, ưu tiên bản TƯƠI:
+
+    1. `goi_log` — đọc thẳng từ container lúc mở phiếu (`tai_log()`). Sự cố còn
+       mở thì cửa sổ kéo tới hiện tại, nên đây là log đang chảy ra lúc này.
+    2. `hypotheses[].log_evidence` — ảnh chụp Agent đã lưu. Chỉ tồn tại khi log
+       đổi được kết luận, nên hiếm; giữ làm đường lùi cho lúc không đọc được
+       container (bản API trên Render), và cho phiếu cũ đã đóng từ lâu.
+    """
+    goi_log = goi_log or {}
+    tuoi = [lg for lg in (goi_log.get("logs") or []) if isinstance(lg, dict)]
+
+    # Thứ tự nguồn: log Agent đã LƯU lên Jira đứng trước log gắn kèm giả thuyết —
+    # cái trước có ở mọi sự cố, cái sau chỉ có khi log đổi được kết luận.
+    da_luu: list[dict] = [lg for lg in (log_da_luu or []) if isinstance(lg, dict)]
+    for h in hypotheses:
+        da_luu.extend(lg for lg in (h.get("log_evidence") or []) if isinstance(lg, dict))
+
+    dong_nguon = tuoi or da_luu
+    la_tuoi = bool(tuoi)
+
+    if not dong_nguon:
+        cau = _LY_DO_LOG.get(str(goi_log.get("ly_do", "")), "")
+        if not cau:
+            # Không có `goi_log` nghĩa là bản API đang chạy chưa có endpoint
+            # `/logs`. Nói ra, thay vì im lặng để người đọc tưởng service sạch.
+            cau = (
+                "Chưa đọc được log cho phiếu này. Bản API đang chạy có thể chưa có "
+                "<code>GET /api/incidents/{key}/logs</code>."
+            )
+        return (
+            '<div class="evidence"><div class="toggle-section">'
+            '<button class="toggle-btn" type="button" '
+            "onclick=\"this.parentElement.classList.toggle('open')\">"
+            '<span class="toggle-icon">▶</span> Log gốc — không có dòng nào</button>'
+            f'<div class="toggle-content"><div class="hint">{cau}</div></div>'
+            "</div></div>"
+        )
+
+    hang: list[str] = []
+    for lg, so_lan in _gop_dong_lap(dong_nguon):
+        muc_do = str(lg.get("level", "INFO")).upper()
+        lop = {"ERROR": "lv-error", "WARNING": "lv-warn", "WARN": "lv-warn"}.get(muc_do, "lv-info")
+        mau_pattern = f' <span class="cm">[{e(lg["pattern"])}]</span>' if lg.get("pattern") else ""
+        lap = f'<span class="lap">×{so_lan}</span>' if so_lan > 1 else ""
+        hang.append(
+            f'<span class="log-line">{lap}<span class="cm">{e(_moc_log(str(lg.get("timestamp") or "")))}</span> '
+            f'<span class="{lop}">{e(muc_do)}</span>{mau_pattern} '
+            f'{e(lg.get("message", ""))}</span>'
+        )
+
+    nguon = " · ".join(sorted({str(lg.get("source", "")) for lg in dong_nguon if lg.get("source")}))
     _, ten_muc = labels.log_level("ERROR")
+
+    if la_tuoi:
+        cua_so = (
+            f'{_moc_log(str(goi_log.get("start", "")))} → '
+            f'{_moc_log(str(goi_log.get("end", "")))}'
+        )
+        duoi = (
+            f'<div class="hint">Đọc thẳng từ container lúc mở trang, cửa sổ {e(cua_so)} '
+            + (
+                "— sự cố còn mở nên cửa sổ kéo tới hiện tại, làm mới trang là thấy dòng mới."
+                if goi_log.get("dang_mo")
+                else "— sự cố đã đóng nên cửa sổ dừng ở mốc khắc phục."
+            )
+            + f" Đã gộp {len(dong_nguon)} dòng thành {len(hang)} mục, dòng trùng liền nhau "
+            "gom lại kèm số lần.</div>"
+        )
+        tieu_de = f"Log gốc đọc trực tiếp — dòng đỏ là mức {e(ten_muc)}"
+    else:
+        duoi = (
+            '<div class="hint">Đây là bản Agent đã lưu lúc chẩn đoán, KHÔNG phải log '
+            "hiện tại — log container của cửa sổ đó đã trôi mất, hoặc trang đang "
+            "chạy ở chỗ không với tới container.</div>"
+        )
+        tieu_de = f"Log Agent đã lưu — dòng đỏ là mức {e(ten_muc)}"
+
+    noi_dung_log = khoi_code(f"LOG · {nguon or 'container'}", "".join(hang))
     return (
         '<div class="evidence">'
-        f"<p>Log gốc Agent đọc được lúc chẩn đoán — giữ nguyên văn để người trực grep "
-        f"đúng chữ. Dòng đỏ là mức {e(ten_muc)}.</p>"
-        + khoi_code(f"LOG · {ten_nguon}", "".join(dong))
-        + "</div>"
+        '<div class="toggle-section">'
+        '<button class="toggle-btn" type="button" '
+        "onclick=\"this.parentElement.classList.toggle('open')\">"
+        f'<span class="toggle-icon">▶</span> {tieu_de}</button>'
+        f'<div class="toggle-content">{noi_dung_log}{duoi}</div>'
+        "</div></div>"
     )
 
 
@@ -2222,51 +2446,6 @@ def khoi_dien_bien(inc: dict) -> str:
     )
 
 
-def khoi_postmortem(postmortem: dict) -> str:
-    """Tóm tắt sau sự cố — văn hoá blameless, mô tả hệ thống chứ không chỉ trích."""
-    return (
-        '<div class="evidence">'
-        f'<p>{e(postmortem.get("summary", ""))}</p>'
-        f'<p><strong>Nguyên nhân gốc:</strong> {e(postmortem.get("root_cause", ""))}</p>'
-        f'<p><strong>Tác động:</strong> {e(postmortem.get("impact", ""))}</p>'
-        "</div>"
-    )
-
-
-def khoi_viec_can_lam(postmortem: dict) -> str:
-    """Checklist việc cần làm sau sự cố.
-
-    ⚠️ Ô tick luôn để trống. `ActionItem` không có trường trạng thái, nên tick
-    sẵn là bịa tiến độ. Trạng thái thật nằm ở sub-task Jira — nhấn vào là sang
-    đúng phiếu đó.
-    """
-    viec = postmortem.get("action_items") or []
-    if not viec:
-        return '<div class="note">Postmortem chưa liệt kê việc cần làm tiếp.</div>'
-
-    hang: list[str] = []
-    for item in viec:
-        khoa = str(item.get("jira_key") or "")
-        the = f'<div class="tag">{e(khoa)}</div>' if khoa else '<div class="tag">chưa tạo phiếu</div>'
-        nguoi = f'<div class="assignee">{e(item["owner"])}</div>' if item.get("owner") else ""
-        than = (
-            f'<div class="check-box"></div>'
-            f'<div class="text">{e(item.get("title", ""))}</div>{nguoi}{the}'
-        )
-        if khoa and JIRA_URL:
-            hang.append(
-                f'<a class="check-item" href="{e(f"{JIRA_URL}/browse/{khoa}")}" '
-                f'target="_blank" rel="noopener">{than}</a>'
-            )
-        else:
-            hang.append(f'<div class="check-item">{than}</div>')
-    return (
-        f'<div class="checklist">{"".join(hang)}</div>'
-        '<div class="hint">Ô tick để trống là cố ý: trạng thái hoàn thành nằm ở sub-task Jira, '
-        "trang này không đọc được nên không đánh dấu thay.</div>"
-    )
-
-
 def khoi_lien_quan(inc: dict, bang_tra: dict[str, dict]) -> str:
     """Sự cố liên quan — dấu hiệu một nguyên nhân đang lan sang dịch vụ khác."""
     khoa = inc.get("related_incidents") or []
@@ -2396,11 +2575,7 @@ def dau_trang(inc: dict, anh_huong: tuple[str, str]) -> str:
         f'<div class="tech" style="margin:-6px 0 14px">'
         f'<span class="arrow">↳</span>{e(tieu_de_tho)}</div>'
         f'<div class="case-meta">{"".join(meta)}</div>'
-        + (
-            f'<div class="note" style="margin-bottom:28px">{e(giai_thich)}</div>'
-            if giai_thich
-            else ""
-        )
+        + ""
     )
 
 
@@ -2410,7 +2585,6 @@ def view_su_co(inc: dict, kho: dict, dang_chon: bool = False) -> str:
     da_xong = inc.get("state") not in DANG_XAY_RA
     signal = inc.get("signal") or {}
     hypotheses = inc.get("hypotheses") or []
-    postmortem = inc.get("postmortem") or {}
     chuoi = (kho.get("chuoi") or {}).get(khoa)
     anh_huong = (kho.get("anh_huong") or {}).get(khoa, ("—", "chưa đo"))
     luc = inc.get("detected_at")
@@ -2427,10 +2601,7 @@ def view_su_co(inc: dict, kho: dict, dang_chon: bool = False) -> str:
     so = 0
     # ── 01 · Bằng chứng / Tóm tắt
     so += 1
-    if da_xong and postmortem:
-        than = khoi_postmortem(postmortem)
-    else:
-        than = ""
+    than = ""
     if signal:
         than += bang_vitals(inc, signal, chuoi)
         # Dòng `↳` cho cả dải vitals: người trực cần tên metric gốc và con số
@@ -2452,7 +2623,9 @@ def view_su_co(inc: dict, kho: dict, dang_chon: bool = False) -> str:
             '<div class="note">Sự cố này không kèm tín hiệu gốc — nó được tạo trước khi '
             "Agent biết lưu lại tín hiệu đo được.</div>"
         )
-    than += khoi_log(hypotheses)
+    than += khoi_log(
+        hypotheses, (kho.get("log") or {}).get(khoa), inc.get("log_evidence")
+    )
     phan.append(
         muc(
             so,
@@ -2498,19 +2671,7 @@ def view_su_co(inc: dict, kho: dict, dang_chon: bool = False) -> str:
     so += 1
     phan.append(muc(so, "Diễn biến", "Timeline <em>đầy đủ</em>" if da_xong else "Timeline", khoi_dien_bien(inc)))
 
-    # ── 05 · Bài học (chỉ khi có postmortem)
-    if postmortem:
-        so += 1
-        viec = postmortem.get("action_items") or []
-        phan.append(
-            muc(
-                so,
-                "Bài học",
-                "Hành động <em>để không lặp lại</em>",
-                khoi_viec_can_lam(postmortem),
-                aside=f"{len(viec)} việc cần làm" if viec else "",
-            )
-        )
+
 
     # ── 06 · Ngữ cảnh (chỉ khi có sự cố liên quan)
     lien_quan = khoi_lien_quan(inc, kho.get("bang_tra") or {})
@@ -2651,6 +2812,9 @@ def header_html(kho: dict, inc_chon: dict) -> str:
         f'<div class="status-item" title="{e(tooltip)}">{cham_agent}Agent {chu_agent}</div>'
         "</div></div>"
         '<div class="header-right">'
+        # Nút quay về Status Page — nằm trước Runbooks.
+        f'<button class="hbtn" type="button" id="btn-status-page" title="Quay về Status Page">'
+        f'{ICON["tia"]}Status Page</button>'
         # Hai nút này thao tác lên chính phiếu đang xem, nên phiếu không có
         # runbook/postmortem thì khoá lại kèm lý do. Để bấm được mà không xảy ra
         # gì là kiểu hỏng khó chịu nhất: người dùng tưởng trang treo.
@@ -2947,6 +3111,22 @@ _JS = """
     if (man) { man.hidden = false; }
     if (!dieuHuong(viewDangMo())) { if (man) { man.hidden = true; } }
   });
+
+  // ═══ Nút quay về Status Page ═══
+  document.getElementById('btn-status-page').addEventListener('click', function () {
+    try {
+      var u = new URL(window.parent.location.href);
+      // Xoá path /war_room, giữ lại origin để quay về trang gốc (status_page)
+      var idx = u.pathname.indexOf('/war_room');
+      if (idx !== -1) u.pathname = u.pathname.substring(0, idx) + '/';
+      u.search = '';
+      window.parent.history.replaceState({}, '', u.toString());
+      window.parent.location.reload();
+    } catch (err) {
+      // Fallback: mở trong cùng tab
+      window.open('/', '_top');
+    }
+  });
 })();
 """
 
@@ -3007,10 +3187,15 @@ inc_chon = tai_chi_tiet(dang_chon) or rut_gon or {}
 kho["prom"] = prom_song_cached()
 kho["chuoi"] = {}
 kho["anh_huong"] = {}
+kho["log"] = {}
 # Thẻ "sự cố liên quan" tra bằng bản rút gọn trong danh sách — đủ mã, mức độ,
 # tiêu đề, trạng thái. Không gọi thêm API cho từng phiếu liên quan.
 kho["bang_tra"] = {i["jira_key"]: i for i in ds if i.get("jira_key")}
 if inc_chon:
+    # Chỉ phiếu ĐANG XEM, cùng lý do với `tai_chi_tiet()`: mỗi lời gọi là một
+    # lượt `docker logs` trên máy chạy API, nhân 34 phiếu là không dùng được.
+    kho["log"][dang_chon] = tai_log(dang_chon)
+
     signal_chon = inc_chon.get("signal") or {}
     if signal_chon:
         # Hỏi tại MỐC PHÁT HIỆN, không phải "bây giờ". Sự cố đã qua thì cửa sổ
