@@ -22,7 +22,11 @@
 | **ADR** | 3 quyết định kiến trúc kèm lý do và đánh đổi | [docs/adr/](docs/adr/) |
 | **Contracts** | 4 interface giữa 4 thành viên — thứ mở khoá làm song song | [docs/contracts/](docs/contracts/) |
 | **Use cases** | 3 kịch bản sự cố + ground truth để đo độ chính xác chẩn đoán | [docs/use-cases.md](docs/use-cases.md) |
-| **Live URL** | Backend đang chạy | [p-035-incident-agent.onrender.com](https://p-035-incident-agent.onrender.com) |
+| **Tài liệu kiểm thử** | Chiến lược 4 tầng · 673 test · số đo chất lượng · **và bộ test này KHÔNG bắt được gì** | [docs/TESTING.md](docs/TESTING.md) |
+| **Kết quả đo** | 50 case, recall 84% — kèm 4 case bỏ lọt **kể tên** | [eval/RESULTS-2026-08-21.md](eval/RESULTS-2026-08-21.md) |
+| **Bằng chứng kiểm thử tay** | 5 test case chạy trên hệ thống thật, output thật | [eval/EVIDENCE.md](eval/EVIDENCE.md) |
+| **Live URL** | **Sản phẩm chạy được** — trang trạng thái + war room | **[035.emmetech.id.vn](https://035.emmetech.id.vn)** |
+| Live URL (backend) | API + Swagger | [p-035-incident-agent.onrender.com/docs](https://p-035-incident-agent.onrender.com/docs) |
 | **AI Logs** | Hook ghi + submit AI usage log | [.github/hooks/hooks.json](.github/hooks/hooks.json) · LangSmith |
 | **Weekly Journal** | Mục tiêu, khó khăn, bài học từng tuần | [JOURNAL.md](JOURNAL.md) |
 | **Worklog** | Ai làm gì theo ngày | [WORKLOG.md](WORKLOG.md) |
@@ -268,7 +272,7 @@ Rồi mở http://localhost:9090 và query p95 — xem [demo/README.md](demo/REA
 | 2 | README.md | file này | Đức | ✅ |
 | 3 | Architecture Diagram | `docs/architecture_diagram.md` + `ARCHITECTURE.md` + 3 ADR | Đức | ✅ |
 | 4 | AI Logs | LangSmith + `.ai-log/` | Đức | 🔄 |
-| 5 | Live URL | [p-035-incident-agent.onrender.com](https://p-035-incident-agent.onrender.com) | Đức | ✅ |
+| 5 | Live URL | **[035.emmetech.id.vn](https://035.emmetech.id.vn)** · backend: [onrender.com](https://p-035-incident-agent.onrender.com/docs) | Đức | ✅ |
 | 6 | Video Demo | `presentation/` | Long | ⏳ |
 | 7 | Pitch Deck | `presentation/` | Long | ⏳ |
 | 8 | Weekly Journal | `JOURNAL.md` | Đức | 🔄 |
