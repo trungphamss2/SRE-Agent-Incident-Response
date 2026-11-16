@@ -8,6 +8,10 @@
 
 🌐 **Live:** https://035.emmetech.id.vn · [API docs](https://api-035.emmetech.id.vn/docs) · [status page (JSON)](https://api-035.emmetech.id.vn/api/status)
 
+## 🎬 Video Demo
+
+[![Xem Video Demo trên Google Drive](https://img.shields.io/badge/▶_Xem_Video_Demo-Google_Drive-4285F4?style=for-the-badge&logo=googledrive&logoColor=white)](https://drive.google.com/drive/folders/10a8rF__JeiPcRA987d0syZNukfTLtuwf)
+
 ---
 
 ## ▶️ Muốn tự chạy demo? Đọc một file duy nhất
